@@ -1,6 +1,7 @@
 use crate::config::LogMode;
 use crate::routing::RequestMetadata;
 use chrono::{DateTime, Utc};
+use regex::Regex;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::fs::{File, OpenOptions};
@@ -40,6 +41,8 @@ pub struct InteractionLog {
     cost_center: Option<String>,
     quality_mode: Option<String>,
     input_hash: Option<String>,
+    prompt_redacted: Option<String>,
+    response_redacted: Option<String>,
     teacher_model: String,
     selected_model: String,
     routing_decision: String,
@@ -72,6 +75,8 @@ pub struct LogInput<'a> {
     pub http_status: u16,
     pub error_code: Option<&'a str>,
     pub request_summary: &'a str,
+    pub request_body: &'a [u8],
+    pub response_body: &'a [u8],
 }
 
 impl JsonlLogWriter {
@@ -110,13 +115,9 @@ impl JsonlLogWriter {
             task_id: input.task_id.to_string(),
             cost_center: input.metadata.cost_center.clone(),
             quality_mode: input.metadata.quality_mode.clone(),
-            input_hash: match self.mode {
-                LogMode::MetadataOnly | LogMode::Disabled => None,
-                LogMode::Redacted | LogMode::FullEncrypted => Some(format!(
-                    "sha256:{}",
-                    sha256_hex(input.request_summary.as_bytes())
-                )),
-            },
+            input_hash: content_hash(input.request_body, input.request_summary, self.mode),
+            prompt_redacted: redacted_content(input.request_body, self.mode),
+            response_redacted: redacted_content(input.response_body, self.mode),
             teacher_model: input.teacher_model.to_string(),
             selected_model: input.selected_model.to_string(),
             routing_decision: input.routing_decision.to_string(),
@@ -150,6 +151,46 @@ impl JsonlLogWriter {
             let _ = writer.flush();
         }
     }
+}
+
+fn content_hash(body: &[u8], fallback: &str, mode: LogMode) -> Option<String> {
+    match mode {
+        LogMode::MetadataOnly | LogMode::Disabled => None,
+        LogMode::Redacted | LogMode::FullEncrypted => {
+            let content = if body.is_empty() {
+                fallback.as_bytes()
+            } else {
+                body
+            };
+            Some(format!("sha256:{}", sha256_hex(content)))
+        }
+    }
+}
+
+fn redacted_content(body: &[u8], mode: LogMode) -> Option<String> {
+    if body.is_empty() || mode != LogMode::Redacted {
+        return None;
+    }
+
+    let text = String::from_utf8_lossy(body);
+    Some(redact_text(&text))
+}
+
+fn redact_text(text: &str) -> String {
+    let email_re = Regex::new(r"(?i)[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}").unwrap();
+    let secret_re = Regex::new(
+        r#"(?i)("?(?:api[_-]?key|password|secret|token|authorization)"?\s*:\s*")([^"]*)(")"#,
+    )
+    .unwrap();
+    let bearer_re = Regex::new(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+").unwrap();
+    let openai_key_re = Regex::new(r"\bsk-[A-Za-z0-9_-]{12,}\b").unwrap();
+
+    let text = email_re.replace_all(text, "[REDACTED_EMAIL]");
+    let text = secret_re.replace_all(&text, "$1[REDACTED]$3");
+    let text = bearer_re.replace_all(&text, "Bearer [REDACTED]");
+    openai_key_re
+        .replace_all(&text, "sk-[REDACTED]")
+        .into_owned()
 }
 
 fn sha256_hex(input: &[u8]) -> String {
@@ -191,6 +232,8 @@ mod tests {
             http_status: 200,
             error_code: None,
             request_summary: "POST /v1/chat/completions",
+            request_body: br#"{"email":"alice@example.com","password":"secret"}"#,
+            response_body: br#"{"result":"ok","token":"abc"}"#,
         });
 
         let contents = std::fs::read_to_string(path).unwrap();
@@ -198,5 +241,48 @@ mod tests {
         assert!(contents.contains("\"training_eligible\":true"));
         assert!(contents.contains("\"input_tokens\":16"));
         assert!(contents.contains("\"estimated_cost_usd\":0.001"));
+        assert!(contents.contains("[REDACTED_EMAIL]"));
+        assert!(!contents.contains("alice@example.com"));
+        assert!(!contents.contains("secret"));
+    }
+
+    #[test]
+    fn metadata_only_does_not_store_content_or_hash() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let path = temp_dir.path().join("proxy.jsonl");
+        let writer = JsonlLogWriter::new(&path, LogMode::MetadataOnly).unwrap();
+        let metadata = RequestMetadata {
+            request_id: "req_1".to_string(),
+            client_id: Some("crm_backend".to_string()),
+            task_id: Some("email_classification_v1".to_string()),
+            cost_center: None,
+            quality_mode: None,
+            pii_level: None,
+            no_train: false,
+        };
+
+        writer.write(LogInput {
+            metadata: &metadata,
+            task_id: "email_classification_v1",
+            teacher_model: "teacher",
+            selected_model: "teacher",
+            routing_decision: "teacher",
+            routing_reason: "teacher_only",
+            latency: Duration::from_millis(12),
+            input_tokens: 16,
+            output_tokens: 4,
+            estimated_cost_usd: 0.001,
+            estimated_teacher_cost_usd: 0.001,
+            http_status: 200,
+            error_code: None,
+            request_summary: "POST /v1/chat/completions",
+            request_body: br#"{"email":"alice@example.com"}"#,
+            response_body: br#"{"result":"ok"}"#,
+        });
+
+        let contents = std::fs::read_to_string(path).unwrap();
+        assert!(contents.contains("\"input_hash\":null"));
+        assert!(contents.contains("\"prompt_redacted\":null"));
+        assert!(contents.contains("\"response_redacted\":null"));
     }
 }

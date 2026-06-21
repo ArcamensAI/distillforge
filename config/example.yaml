@@ -23,6 +23,7 @@ students:
 logging:
   path: "data/logs/proxy.jsonl"
   mode: "redacted"
+  max_capture_bytes: 65536
 
 routing:
   default_missing_task_behavior: "teacher_fallback"

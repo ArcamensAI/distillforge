@@ -34,6 +34,8 @@ struct RequestContext {
     selected_backend: Option<ModelBackendConfig>,
     request_body_bytes: usize,
     response_body_bytes: usize,
+    request_body_capture: Vec<u8>,
+    response_body_capture: Vec<u8>,
     skip_interaction_log: bool,
 }
 
@@ -61,6 +63,8 @@ impl ProxyHttp for DistillProxy {
             selected_backend: None,
             request_body_bytes: 0,
             response_body_bytes: 0,
+            request_body_capture: Vec::new(),
+            response_body_capture: Vec::new(),
             skip_interaction_log: false,
         }
     }
@@ -182,6 +186,11 @@ impl ProxyHttp for DistillProxy {
     {
         if let Some(body) = body {
             ctx.request_body_bytes += body.len();
+            append_capture(
+                &mut ctx.request_body_capture,
+                body,
+                self.config.logging.max_capture_bytes,
+            );
         }
         Ok(())
     }
@@ -234,6 +243,11 @@ impl ProxyHttp for DistillProxy {
     {
         if let Some(body) = body {
             ctx.response_body_bytes += body.len();
+            append_capture(
+                &mut ctx.response_body_capture,
+                body,
+                self.config.logging.max_capture_bytes,
+            );
         }
         Ok(None)
     }
@@ -291,6 +305,8 @@ impl ProxyHttp for DistillProxy {
             http_status: status,
             error_code,
             request_summary: &request_summary,
+            request_body: &ctx.request_body_capture,
+            response_body: &ctx.response_body_capture,
         });
     }
 }
@@ -373,6 +389,14 @@ fn estimate_cost_usd(backend: &ModelBackendConfig, input_tokens: u64, output_tok
     let output_cost =
         (output_tokens as f64 / 1_000_000.0) * backend.output_cost_per_million_tokens_usd;
     input_cost + output_cost
+}
+
+fn append_capture(capture: &mut Vec<u8>, chunk: &[u8], max_capture_bytes: usize) {
+    if capture.len() >= max_capture_bytes {
+        return;
+    }
+    let remaining = max_capture_bytes - capture.len();
+    capture.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
 }
 
 async fn respond_text(session: &mut Session, status: u16, body: &str) -> Result<()> {

@@ -72,3 +72,13 @@ python3 tools/finops_report.py --logs 'data/logs/*.jsonl'
 
 Le rapport affiche les volumes, decisions de routage, latences, couts estimes
 et economies estimees par tache et par modele.
+
+## Logs redacted
+
+En mode `redacted`, DistillForge capture au maximum
+`logging.max_capture_bytes` octets des corps de requete et de reponse, puis
+ecrit `prompt_redacted` et `response_redacted` dans le JSONL. Les emails,
+tokens bearer, cles `sk-*` et champs JSON courants comme `password`, `token`,
+`secret`, `api_key` et `authorization` sont masques.
+
+En mode `metadata_only`, aucun contenu ni hash d'entree n'est stocke.

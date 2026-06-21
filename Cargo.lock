@@ -571,6 +571,7 @@ dependencies = [
  "http",
  "log",
  "pingora",
+ "regex",
  "serde",
  "serde_json",
  "serde_yaml",
