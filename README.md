@@ -76,8 +76,18 @@ python3 -m pip install -r requirements-analytics.txt
 python3 tools/finops_report.py --logs 'data/logs/*.jsonl'
 ```
 
-Le rapport affiche les volumes, decisions de routage, latences, couts estimes
-et economies estimees par tache et par modele.
+Le rapport affiche les volumes, decisions de routage, latences, couts estimes,
+economies estimees et taches candidates a distillation.
+
+Un dashboard HTML autonome peut aussi etre genere sans serveur :
+
+```sh
+python3 tools/finops_dashboard.py --logs 'data/logs/*.jsonl'
+```
+
+Le fichier `reports/distillforge_dashboard.html` affiche les KPIs FinOps,
+le mix de routage, la tendance quotidienne, les couts par centre et les taches
+candidates a distillation.
 
 ## Dataset builder
 

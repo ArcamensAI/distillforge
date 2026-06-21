@@ -15,6 +15,12 @@ def main() -> int:
         default="data/logs/*.jsonl",
         help="JSONL log path or glob. Default: data/logs/*.jsonl",
     )
+    parser.add_argument(
+        "--candidate-min-requests",
+        type=int,
+        default=20,
+        help="Minimum requests for distillation candidates. Default: 20",
+    )
     args = parser.parse_args()
 
     try:
@@ -115,6 +121,36 @@ def main() -> int:
             WHERE status = 'error'
             GROUP BY error_code
             ORDER BY requests DESC
+            """,
+        )
+    )
+
+    print("\n## Distillation Candidates\n")
+    print_table(
+        *query(
+            con,
+            f"""
+            SELECT
+              task_id,
+              count(*) AS requests,
+              sum(CASE WHEN routing_decision = 'teacher' THEN 1 ELSE 0 END) AS teacher_requests,
+              round(sum(coalesce(estimated_teacher_cost_usd, 0)), 8) AS teacher_cost_usd,
+              round(sum(coalesce(estimated_teacher_cost_usd, 0)) - sum(coalesce(estimated_cost_usd, 0)), 8) AS current_savings_usd,
+              round(avg(latency_ms), 2) AS avg_latency_ms,
+              round(sum(CASE WHEN status = 'error' THEN 1 ELSE 0 END)::DOUBLE / count(*), 6) AS error_rate,
+              round(
+                sum(coalesce(estimated_teacher_cost_usd, 0))
+                * CASE
+                    WHEN sum(CASE WHEN routing_decision = 'student' THEN 1 ELSE 0 END) = 0 THEN 0.70
+                    ELSE 0.25
+                  END,
+                8
+              ) AS estimated_remaining_savings_usd
+            FROM logs
+            GROUP BY task_id
+            HAVING count(*) >= {int(args.candidate_min_requests)}
+            ORDER BY estimated_remaining_savings_usd DESC, teacher_cost_usd DESC
+            LIMIT 20
             """,
         )
     )
