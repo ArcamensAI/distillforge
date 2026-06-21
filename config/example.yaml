@@ -1,0 +1,17 @@
+server:
+  listen_addr: "127.0.0.1:6188"
+  metrics_addr: "127.0.0.1:6192"
+
+teacher:
+  name: "teacher"
+  address: "127.0.0.1:9000"
+  use_tls: false
+  sni: ""
+  host_header: "127.0.0.1:9000"
+
+logging:
+  path: "data/logs/proxy.jsonl"
+  mode: "redacted"
+
+routing:
+  default_missing_task_behavior: "teacher_fallback"
