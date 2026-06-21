@@ -139,3 +139,18 @@ tokens bearer, cles `sk-*` et champs JSON courants comme `password`, `token`,
 `secret`, `api_key` et `authorization` sont masques.
 
 En mode `metadata_only`, aucun contenu ni hash d'entree n'est stocke.
+
+## Feedback humain
+
+Les clients peuvent envoyer une correction liee a une requete :
+
+```sh
+curl -X POST http://127.0.0.1:6188/v1/feedback \
+  -H 'Content-Type: application/json' \
+  -H 'X-Client-ID: crm_backend' \
+  -H 'X-Task-ID: email_classification_v1' \
+  -d '{"request_id":"req_123","rating":"bad","correct_output":"billing_issue","comment":"Mauvaise classe"}'
+```
+
+Les feedbacks sont rediges dans `logging.feedback_path` au format JSONL, avec
+redaction des champs texte sensibles.

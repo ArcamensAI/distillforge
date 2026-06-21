@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use bytes::Bytes;
 use distillforge::config::{load_config, AppConfig, ModelBackendConfig};
+use distillforge::feedback::FeedbackWriter;
 use distillforge::log_writer::{JsonlLogWriter, LogInput};
 use distillforge::metrics::ProxyMetrics;
 use distillforge::routing::{
@@ -18,6 +19,7 @@ use std::time::Instant;
 struct DistillProxy {
     config: Arc<AppConfig>,
     logs: Arc<JsonlLogWriter>,
+    feedback: Arc<FeedbackWriter>,
     metrics: Arc<ProxyMetrics>,
     routing_snapshot: Arc<RwLock<RoutingSnapshot>>,
 }
@@ -100,6 +102,32 @@ impl ProxyHttp for DistillProxy {
                 Err(err) => (400, format!("{err}\n")),
             };
             respond_text(session, reload_response.0, &reload_response.1).await?;
+            return Ok(true);
+        }
+        if path == "/v1/feedback" {
+            ctx.skip_interaction_log = true;
+            self.metrics.inc_feedback();
+            match read_limited_body(session, self.config.logging.max_capture_bytes).await {
+                Ok(body) => match serde_json::from_slice::<serde_json::Value>(&body) {
+                    Ok(value) => {
+                        let headers = &session.req_header().headers;
+                        self.feedback.write_value(
+                            &value,
+                            header_value(headers, "x-client-id"),
+                            header_value(headers, "x-task-id"),
+                        );
+                        respond_text(session, 202, "accepted\n").await?;
+                    }
+                    Err(_) => {
+                        self.metrics.inc_rejected();
+                        respond_text(session, 400, "invalid feedback json\n").await?;
+                    }
+                },
+                Err(_) => {
+                    self.metrics.inc_rejected();
+                    respond_text(session, 413, "feedback body too large\n").await?;
+                }
+            }
             return Ok(true);
         }
 
@@ -332,6 +360,13 @@ fn main() {
             std::process::exit(1);
         }
     };
+    let feedback = match FeedbackWriter::new(&config.logging.feedback_path) {
+        Ok(feedback) => Arc::new(feedback),
+        Err(err) => {
+            error!("{err}");
+            std::process::exit(1);
+        }
+    };
     let metrics = Arc::new(ProxyMetrics::default());
     let routing_snapshot = match load_routing_snapshot(&config.routing.snapshot_path) {
         Ok(snapshot) => {
@@ -353,6 +388,7 @@ fn main() {
     let proxy = DistillProxy {
         config: Arc::clone(&config),
         logs,
+        feedback,
         metrics,
         routing_snapshot,
     };
@@ -397,6 +433,31 @@ fn append_capture(capture: &mut Vec<u8>, chunk: &[u8], max_capture_bytes: usize)
     }
     let remaining = max_capture_bytes - capture.len();
     capture.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
+}
+
+async fn read_limited_body(session: &mut Session, max_bytes: usize) -> Result<Vec<u8>> {
+    let mut body = Vec::new();
+    while let Some(chunk) = session.as_downstream_mut().read_request_body().await? {
+        if body.len() + chunk.len() > max_bytes {
+            let _ = session.as_downstream_mut().drain_request_body().await;
+            return Err(Error::because(
+                ErrorType::HTTPStatus(413),
+                "feedback body too large",
+                "feedback body exceeds configured capture limit",
+            ));
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
+}
+
+fn header_value(headers: &http::HeaderMap, name: &str) -> Option<String> {
+    headers
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
 }
 
 async fn respond_text(session: &mut Session, status: u16, body: &str) -> Result<()> {

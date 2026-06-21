@@ -41,6 +41,8 @@ pub struct ModelBackendConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub struct LoggingConfig {
     pub path: String,
+    #[serde(default = "default_feedback_path")]
+    pub feedback_path: String,
     #[serde(default)]
     pub mode: LogMode,
     #[serde(default = "default_max_capture_bytes")]
@@ -125,6 +127,10 @@ fn default_snapshot_path() -> String {
     "config/routing_snapshot.json".to_string()
 }
 
+fn default_feedback_path() -> String {
+    "data/logs/feedback.jsonl".to_string()
+}
+
 fn default_max_capture_bytes() -> usize {
     64 * 1024
 }
@@ -142,6 +148,7 @@ mod tests {
         assert_eq!(config.students.len(), 1);
         assert_eq!(config.routing.snapshot_path, "config/routing_snapshot.json");
         assert_eq!(config.logging.mode, LogMode::Redacted);
+        assert_eq!(config.logging.feedback_path, "data/logs/feedback.jsonl");
         assert_eq!(config.logging.max_capture_bytes, 65_536);
         assert_eq!(
             config.routing.default_missing_task_behavior,

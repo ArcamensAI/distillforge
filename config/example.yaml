@@ -22,6 +22,7 @@ students:
 
 logging:
   path: "data/logs/proxy.jsonl"
+  feedback_path: "data/logs/feedback.jsonl"
   mode: "redacted"
   max_capture_bytes: 65536
 

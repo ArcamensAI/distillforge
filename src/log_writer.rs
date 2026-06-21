@@ -176,7 +176,7 @@ fn redacted_content(body: &[u8], mode: LogMode) -> Option<String> {
     Some(redact_text(&text))
 }
 
-fn redact_text(text: &str) -> String {
+pub fn redact_text(text: &str) -> String {
     let email_re = Regex::new(r"(?i)[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}").unwrap();
     let secret_re = Regex::new(
         r#"(?i)("?(?:api[_-]?key|password|secret|token|authorization)"?\s*:\s*")([^"]*)(")"#,
