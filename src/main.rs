@@ -1,14 +1,17 @@
 use async_trait::async_trait;
-use distillforge::config::{load_config, AppConfig};
+use distillforge::config::{load_config, AppConfig, ModelBackendConfig};
 use distillforge::log_writer::{JsonlLogWriter, LogInput};
 use distillforge::metrics::ProxyMetrics;
-use distillforge::routing::{decide_route, extract_metadata, RequestMetadata, RoutingDecision};
+use distillforge::routing::{
+    decide_route, extract_metadata, load_routing_snapshot, RequestMetadata, RoutingDecision,
+    RoutingSnapshot,
+};
 use log::{error, info};
 use pingora::prelude::*;
 use pingora::proxy::{http_proxy_service, ProxyHttp, Session};
 use pingora::http::ResponseHeader;
 use bytes::Bytes;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::Instant;
 
 #[derive(Clone)]
@@ -16,6 +19,7 @@ struct DistillProxy {
     config: Arc<AppConfig>,
     logs: Arc<JsonlLogWriter>,
     metrics: Arc<ProxyMetrics>,
+    routing_snapshot: Arc<RwLock<RoutingSnapshot>>,
 }
 
 #[derive(Debug, Clone)]
@@ -24,7 +28,10 @@ struct RequestContext {
     metadata: RequestMetadata,
     decision: Option<RoutingDecision>,
     task_id: String,
-    routing_reason: &'static str,
+    selected_model: String,
+    routing_decision: String,
+    routing_reason: String,
+    selected_backend: Option<ModelBackendConfig>,
     skip_interaction_log: bool,
 }
 
@@ -46,7 +53,10 @@ impl ProxyHttp for DistillProxy {
             },
             decision: None,
             task_id: "unknown_task".to_string(),
-            routing_reason: "not_routed",
+            selected_model: "none".to_string(),
+            routing_decision: "none".to_string(),
+            routing_reason: "not_routed".to_string(),
+            selected_backend: None,
             skip_interaction_log: false,
         }
     }
@@ -67,34 +77,88 @@ impl ProxyHttp for DistillProxy {
         }
         if path == "/admin/reload-routing" {
             ctx.skip_interaction_log = true;
-            respond_text(session, 501, "routing reload is not implemented in V1\n").await?;
+            let reload_response = match load_routing_snapshot(&self.config.routing.snapshot_path) {
+                Ok(snapshot) => match self.routing_snapshot.write() {
+                    Ok(mut active_snapshot) => {
+                        let version = snapshot.version;
+                        *active_snapshot = snapshot;
+                        (
+                            200,
+                            format!("routing snapshot reloaded version={version}\n"),
+                        )
+                    }
+                    Err(_) => (500, "routing snapshot lock poisoned\n".to_string()),
+                },
+                Err(err) => (400, format!("{err}\n")),
+            };
+            respond_text(session, reload_response.0, &reload_response.1).await?;
             return Ok(true);
         }
 
         if path != "/v1/chat/completions" && path != "/v1/completions" {
             self.metrics.inc_rejected();
-            ctx.routing_reason = "unsupported_path";
+            ctx.routing_reason = "unsupported_path".to_string();
             let _ = session.respond_error(404).await;
             return Ok(true);
         }
 
         ctx.metadata = extract_metadata(&session.req_header().headers);
+        let snapshot = self
+            .routing_snapshot
+            .read()
+            .map(|snapshot| snapshot.clone())
+            .unwrap_or_default();
         let decision = decide_route(
             &ctx.metadata,
             self.config.routing.default_missing_task_behavior,
+            &snapshot,
         );
 
         match &decision {
             RoutingDecision::Teacher { reason, task_id } => {
                 self.metrics.inc_teacher();
                 ctx.task_id = task_id.clone();
-                ctx.routing_reason = reason;
+                ctx.routing_reason = reason.clone();
+                ctx.routing_decision = "teacher".to_string();
+                ctx.selected_model = self.config.teacher.name.clone();
+                ctx.selected_backend = Some(self.config.teacher.clone());
                 ctx.decision = Some(decision);
                 Ok(false)
             }
+            RoutingDecision::Student {
+                reason,
+                task_id,
+                model_id,
+            } => match student_backend(&self.config, model_id) {
+                Some(backend) => {
+                    self.metrics.inc_student();
+                    ctx.task_id = task_id.clone();
+                    ctx.routing_reason = reason.clone();
+                    ctx.routing_decision = "student".to_string();
+                    ctx.selected_model = backend.name.clone();
+                    ctx.selected_backend = Some(backend);
+                    ctx.decision = Some(decision);
+                    Ok(false)
+                }
+                None => {
+                    self.metrics.inc_teacher();
+                    ctx.task_id = task_id.clone();
+                    ctx.routing_reason = "student_backend_missing_teacher_fallback".to_string();
+                    ctx.routing_decision = "teacher".to_string();
+                    ctx.selected_model = self.config.teacher.name.clone();
+                    ctx.selected_backend = Some(self.config.teacher.clone());
+                    ctx.decision = Some(RoutingDecision::Teacher {
+                        reason: ctx.routing_reason.clone(),
+                        task_id: task_id.clone(),
+                    });
+                    Ok(false)
+                }
+            },
             RoutingDecision::Reject { status, reason } => {
                 self.metrics.inc_rejected();
-                ctx.routing_reason = reason;
+                ctx.routing_reason = reason.clone();
+                ctx.routing_decision = "reject".to_string();
+                ctx.selected_model = "none".to_string();
                 ctx.decision = Some(decision.clone());
                 let _ = session.respond_error(*status).await;
                 Ok(true)
@@ -102,12 +166,15 @@ impl ProxyHttp for DistillProxy {
         }
     }
 
-    async fn upstream_peer(&self, _session: &mut Session, _ctx: &mut Self::CTX) -> Result<Box<HttpPeer>> {
-        let teacher = &self.config.teacher;
+    async fn upstream_peer(&self, _session: &mut Session, ctx: &mut Self::CTX) -> Result<Box<HttpPeer>> {
+        let backend = ctx
+            .selected_backend
+            .as_ref()
+            .unwrap_or(&self.config.teacher);
         let peer = Box::new(HttpPeer::new(
-            teacher.address.as_str(),
-            teacher.use_tls,
-            teacher.sni.clone(),
+            backend.address.as_str(),
+            backend.use_tls,
+            backend.sni.clone(),
         ));
         Ok(peer)
     }
@@ -116,13 +183,17 @@ impl ProxyHttp for DistillProxy {
         &self,
         _session: &mut Session,
         upstream_request: &mut RequestHeader,
-        _ctx: &mut Self::CTX,
+        ctx: &mut Self::CTX,
     ) -> Result<()> {
-        if let Some(host) = &self.config.teacher.host_header {
+        let backend = ctx
+            .selected_backend
+            .as_ref()
+            .unwrap_or(&self.config.teacher);
+        if let Some(host) = &backend.host_header {
             upstream_request.insert_header("Host", host).unwrap();
         }
         upstream_request
-            .insert_header("X-DistillForge-Routing", "teacher")
+            .insert_header("X-DistillForge-Routing", ctx.routing_decision.as_str())
             .unwrap();
         Ok(())
     }
@@ -149,17 +220,10 @@ impl ProxyHttp for DistillProxy {
             session.req_header().method,
             session.req_header().uri.path()
         );
-        let rejected = matches!(ctx.decision, Some(RoutingDecision::Reject { .. }));
-        let routing_decision = if rejected { "reject" } else { "teacher" };
-        let selected_model = if rejected {
-            "none"
-        } else {
-            &self.config.teacher.name
-        };
         let error_code = if error.is_some() {
             Some("proxy_error")
         } else if status >= 400 {
-            Some(ctx.routing_reason)
+            Some(ctx.routing_reason.as_str())
         } else {
             None
         };
@@ -168,9 +232,9 @@ impl ProxyHttp for DistillProxy {
             metadata: &ctx.metadata,
             task_id: &ctx.task_id,
             teacher_model: &self.config.teacher.name,
-            selected_model,
-            routing_decision,
-            routing_reason: ctx.routing_reason,
+            selected_model: &ctx.selected_model,
+            routing_decision: &ctx.routing_decision,
+            routing_reason: &ctx.routing_reason,
             latency: ctx.started_at.elapsed(),
             http_status: status,
             error_code,
@@ -201,6 +265,19 @@ fn main() {
         }
     };
     let metrics = Arc::new(ProxyMetrics::default());
+    let routing_snapshot = match load_routing_snapshot(&config.routing.snapshot_path) {
+        Ok(snapshot) => {
+            info!(
+                "loaded routing snapshot {} version={}",
+                config.routing.snapshot_path, snapshot.version
+            );
+            Arc::new(RwLock::new(snapshot))
+        }
+        Err(err) => {
+            error!("{err}; falling back to teacher_only routing");
+            Arc::new(RwLock::new(RoutingSnapshot::default()))
+        }
+    };
 
     let mut server = Server::new(None).expect("create pingora server");
     server.bootstrap();
@@ -209,6 +286,7 @@ fn main() {
         config: Arc::clone(&config),
         logs,
         metrics,
+        routing_snapshot,
     };
     let mut proxy_service = http_proxy_service(&server.configuration, proxy);
     proxy_service.add_tcp(&config.server.listen_addr);
@@ -216,6 +294,14 @@ fn main() {
     info!("DistillForge proxy listening on {}", config.server.listen_addr);
     server.add_service(proxy_service);
     server.run_forever();
+}
+
+fn student_backend(config: &AppConfig, model_id: &str) -> Option<ModelBackendConfig> {
+    config
+        .students
+        .iter()
+        .find(|backend| backend.name == model_id)
+        .cloned()
 }
 
 async fn respond_text(session: &mut Session, status: u16, body: &str) -> Result<()> {

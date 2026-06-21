@@ -1,5 +1,10 @@
 use crate::config::MissingTaskBehavior;
 use http::HeaderMap;
+use serde::Deserialize;
+use std::collections::BTreeMap;
+use std::fs;
+use std::hash::{Hash, Hasher};
+use std::path::Path;
 use uuid::Uuid;
 
 pub const HEADER_TASK_ID: &str = "x-task-id";
@@ -13,13 +18,61 @@ pub const HEADER_PII_LEVEL: &str = "x-pii-level";
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum RoutingDecision {
     Teacher {
-        reason: &'static str,
+        reason: String,
         task_id: String,
+    },
+    Student {
+        reason: String,
+        task_id: String,
+        model_id: String,
     },
     Reject {
         status: u16,
-        reason: &'static str,
+        reason: String,
     },
+}
+
+#[derive(Debug, Clone, Deserialize, Eq, PartialEq)]
+pub struct RoutingSnapshot {
+    pub version: u64,
+    #[serde(default)]
+    pub default_mode: RoutingMode,
+    #[serde(default)]
+    pub tasks: BTreeMap<String, TaskRoute>,
+}
+
+impl Default for RoutingSnapshot {
+    fn default() -> Self {
+        Self {
+            version: 0,
+            default_mode: RoutingMode::TeacherOnly,
+            tasks: BTreeMap::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Eq, PartialEq)]
+pub struct TaskRoute {
+    #[serde(default)]
+    pub mode: RoutingMode,
+    #[serde(default)]
+    pub student_model: Option<String>,
+    #[serde(default)]
+    pub student_traffic_percentage: Option<u8>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum RoutingMode {
+    TeacherOnly,
+    StudentOnly,
+    Canary,
+}
+
+impl Default for RoutingMode {
+    fn default() -> Self {
+        Self::TeacherOnly
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -51,34 +104,117 @@ pub fn extract_metadata(headers: &HeaderMap) -> RequestMetadata {
 pub fn decide_route(
     metadata: &RequestMetadata,
     missing_task_behavior: MissingTaskBehavior,
+    snapshot: &RoutingSnapshot,
 ) -> RoutingDecision {
     if metadata.client_id.is_none() {
         return RoutingDecision::Reject {
             status: 400,
-            reason: "missing_client_id",
+            reason: "missing_client_id".to_string(),
         };
     }
 
-    match metadata.task_id.as_deref() {
-        Some(task_id) if !task_id.trim().is_empty() => RoutingDecision::Teacher {
-            reason: "teacher_only_v1",
-            task_id: task_id.to_string(),
-        },
+    let task_id = match metadata.task_id.as_deref() {
+        Some(task_id) if !task_id.trim().is_empty() => task_id.to_string(),
         _ => match missing_task_behavior {
-            MissingTaskBehavior::Reject => RoutingDecision::Reject {
-                status: 400,
-                reason: "missing_task_id",
-            },
-            MissingTaskBehavior::TeacherFallback => RoutingDecision::Teacher {
-                reason: "missing_task_teacher_fallback",
-                task_id: "unknown_task".to_string(),
-            },
-            MissingTaskBehavior::UnknownTask => RoutingDecision::Teacher {
-                reason: "missing_task_unknown_task",
-                task_id: "unknown_task".to_string(),
-            },
+            MissingTaskBehavior::Reject => {
+                return RoutingDecision::Reject {
+                    status: 400,
+                    reason: "missing_task_id".to_string(),
+                };
+            }
+            MissingTaskBehavior::TeacherFallback | MissingTaskBehavior::UnknownTask => {
+                "unknown_task".to_string()
+            }
+        },
+    };
+
+    if metadata.quality_mode.as_deref() == Some("strict") {
+        return RoutingDecision::Teacher {
+            reason: "quality_mode_strict".to_string(),
+            task_id,
+        };
+    }
+
+    let task_route = snapshot.tasks.get(&task_id);
+    let mode = task_route
+        .map(|route| route.mode)
+        .unwrap_or(snapshot.default_mode);
+
+    match mode {
+        RoutingMode::TeacherOnly => RoutingDecision::Teacher {
+            reason: if task_route.is_some() {
+                "teacher_only"
+            } else {
+                "default_teacher_only"
+            }
+            .to_string(),
+            task_id,
+        },
+        RoutingMode::StudentOnly => choose_student(task_id, task_route, "student_only"),
+        RoutingMode::Canary => {
+            let percentage = task_route
+                .and_then(|route| route.student_traffic_percentage)
+                .unwrap_or(0)
+                .min(100);
+            if percentage > 0 && canary_hit(&metadata.request_id, percentage) {
+                choose_student(task_id, task_route, "canary_student")
+            } else {
+                RoutingDecision::Teacher {
+                    reason: "canary_teacher".to_string(),
+                    task_id,
+                }
+            }
+        }
+    }
+}
+
+pub fn load_routing_snapshot(path: impl AsRef<Path>) -> Result<RoutingSnapshot, RoutingSnapshotError> {
+    let path = path.as_ref();
+    let path_display = path.display().to_string();
+    let contents = fs::read_to_string(path).map_err(|source| RoutingSnapshotError::Read {
+        path: path_display.clone(),
+        source,
+    })?;
+    serde_json::from_str(&contents).map_err(|source| RoutingSnapshotError::Parse {
+        path: path_display,
+        source,
+    })
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum RoutingSnapshotError {
+    #[error("failed to read routing snapshot {path}: {source}")]
+    Read {
+        path: String,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("failed to parse routing snapshot {path}: {source}")]
+    Parse {
+        path: String,
+        #[source]
+        source: serde_json::Error,
+    },
+}
+
+fn choose_student(task_id: String, task_route: Option<&TaskRoute>, reason: &str) -> RoutingDecision {
+    match task_route.and_then(|route| route.student_model.as_deref()) {
+        Some(model_id) => RoutingDecision::Student {
+            reason: reason.to_string(),
+            task_id,
+            model_id: model_id.to_string(),
+        },
+        None => RoutingDecision::Teacher {
+            reason: "student_unavailable_teacher_fallback".to_string(),
+            task_id,
         },
     }
+}
+
+fn canary_hit(request_id: &str, percentage: u8) -> bool {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    request_id.hash(&mut hasher);
+    (hasher.finish() % 100) < u64::from(percentage)
 }
 
 fn header_value(headers: &HeaderMap, name: &str) -> Option<String> {
@@ -122,9 +258,13 @@ mod tests {
         };
 
         assert_eq!(
-            decide_route(&metadata, MissingTaskBehavior::TeacherFallback),
+            decide_route(
+                &metadata,
+                MissingTaskBehavior::TeacherFallback,
+                &RoutingSnapshot::default()
+            ),
             RoutingDecision::Teacher {
-                reason: "teacher_only_v1",
+                reason: "default_teacher_only".to_string(),
                 task_id: "email_classification_v1".to_string()
             }
         );
@@ -143,11 +283,85 @@ mod tests {
         };
 
         assert_eq!(
-            decide_route(&metadata, MissingTaskBehavior::TeacherFallback),
+            decide_route(
+                &metadata,
+                MissingTaskBehavior::TeacherFallback,
+                &RoutingSnapshot::default()
+            ),
             RoutingDecision::Reject {
                 status: 400,
-                reason: "missing_client_id"
+                reason: "missing_client_id".to_string()
             }
         );
+    }
+
+    #[test]
+    fn routes_student_only_when_configured() {
+        let mut tasks = BTreeMap::new();
+        tasks.insert(
+            "email_classification_v1".to_string(),
+            TaskRoute {
+                mode: RoutingMode::StudentOnly,
+                student_model: Some("local_student".to_string()),
+                student_traffic_percentage: None,
+            },
+        );
+        let snapshot = RoutingSnapshot {
+            version: 1,
+            default_mode: RoutingMode::TeacherOnly,
+            tasks,
+        };
+        let metadata = RequestMetadata {
+            request_id: "req_1".to_string(),
+            client_id: Some("crm_backend".to_string()),
+            task_id: Some("email_classification_v1".to_string()),
+            cost_center: None,
+            quality_mode: None,
+            pii_level: None,
+            no_train: false,
+        };
+
+        assert_eq!(
+            decide_route(&metadata, MissingTaskBehavior::TeacherFallback, &snapshot),
+            RoutingDecision::Student {
+                reason: "student_only".to_string(),
+                task_id: "email_classification_v1".to_string(),
+                model_id: "local_student".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn strict_quality_mode_forces_teacher() {
+        let metadata = RequestMetadata {
+            request_id: "req_1".to_string(),
+            client_id: Some("crm_backend".to_string()),
+            task_id: Some("email_classification_v1".to_string()),
+            cost_center: None,
+            quality_mode: Some("strict".to_string()),
+            pii_level: None,
+            no_train: false,
+        };
+
+        assert_eq!(
+            decide_route(
+                &metadata,
+                MissingTaskBehavior::TeacherFallback,
+                &RoutingSnapshot::default()
+            ),
+            RoutingDecision::Teacher {
+                reason: "quality_mode_strict".to_string(),
+                task_id: "email_classification_v1".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn parses_example_snapshot() {
+        let snapshot =
+            load_routing_snapshot("config/routing_snapshot.json").expect("snapshot should parse");
+
+        assert_eq!(snapshot.version, 1);
+        assert_eq!(snapshot.default_mode, RoutingMode::TeacherOnly);
     }
 }

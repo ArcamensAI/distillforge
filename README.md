@@ -25,3 +25,22 @@ cargo run
 
 Par defaut le proxy ecoute sur `127.0.0.1:6188` et transmet au teacher
 configure dans `config/example.yaml`.
+
+## Routage local
+
+Le routage est pilote par `config/routing_snapshot.json`. Le snapshot est charge
+au demarrage et peut etre recharge sans redemarrer le proxy :
+
+```sh
+curl -X POST http://127.0.0.1:6188/admin/reload-routing
+```
+
+Modes supportes par le dataplane :
+
+- `teacher_only`
+- `student_only`
+- `canary`
+
+Si un snapshot pointe vers un modele etudiant absent de `config/example.yaml`,
+DistillForge retombe vers le teacher et journalise
+`student_backend_missing_teacher_fallback`.

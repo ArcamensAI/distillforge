@@ -9,9 +9,17 @@ teacher:
   sni: ""
   host_header: "127.0.0.1:9000"
 
+students:
+  - name: "local_student"
+    address: "127.0.0.1:9100"
+    use_tls: false
+    sni: ""
+    host_header: "127.0.0.1:9100"
+
 logging:
   path: "data/logs/proxy.jsonl"
   mode: "redacted"
 
 routing:
   default_missing_task_behavior: "teacher_fallback"
+  snapshot_path: "config/routing_snapshot.json"

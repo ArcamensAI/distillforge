@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "default_mode": "teacher_only",
+  "tasks": {
+    "test_task": {
+      "mode": "teacher_only"
+    }
+  }
+}

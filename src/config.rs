@@ -6,6 +6,8 @@ use std::path::Path;
 pub struct AppConfig {
     pub server: ServerConfig,
     pub teacher: TeacherConfig,
+    #[serde(default)]
+    pub students: Vec<ModelBackendConfig>,
     pub logging: LoggingConfig,
     pub routing: RoutingConfig,
 }
@@ -18,8 +20,10 @@ pub struct ServerConfig {
     pub metrics_addr: String,
 }
 
+pub type TeacherConfig = ModelBackendConfig;
+
 #[derive(Debug, Clone, Deserialize)]
-pub struct TeacherConfig {
+pub struct ModelBackendConfig {
     pub name: String,
     pub address: String,
     #[serde(default)]
@@ -41,6 +45,8 @@ pub struct LoggingConfig {
 pub struct RoutingConfig {
     #[serde(default)]
     pub default_missing_task_behavior: MissingTaskBehavior,
+    #[serde(default = "default_snapshot_path")]
+    pub snapshot_path: String,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Eq, PartialEq)]
@@ -109,6 +115,10 @@ fn default_metrics_addr() -> String {
     "127.0.0.1:6192".to_string()
 }
 
+fn default_snapshot_path() -> String {
+    "config/routing_snapshot.json".to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -119,6 +129,8 @@ mod tests {
 
         assert_eq!(config.server.listen_addr, "127.0.0.1:6188");
         assert_eq!(config.teacher.address, "127.0.0.1:9000");
+        assert_eq!(config.students.len(), 1);
+        assert_eq!(config.routing.snapshot_path, "config/routing_snapshot.json");
         assert_eq!(config.logging.mode, LogMode::Redacted);
         assert_eq!(
             config.routing.default_missing_task_behavior,
