@@ -168,7 +168,9 @@ pub fn decide_route(
     }
 }
 
-pub fn load_routing_snapshot(path: impl AsRef<Path>) -> Result<RoutingSnapshot, RoutingSnapshotError> {
+pub fn load_routing_snapshot(
+    path: impl AsRef<Path>,
+) -> Result<RoutingSnapshot, RoutingSnapshotError> {
     let path = path.as_ref();
     let path_display = path.display().to_string();
     let contents = fs::read_to_string(path).map_err(|source| RoutingSnapshotError::Read {
@@ -197,7 +199,11 @@ pub enum RoutingSnapshotError {
     },
 }
 
-fn choose_student(task_id: String, task_route: Option<&TaskRoute>, reason: &str) -> RoutingDecision {
+fn choose_student(
+    task_id: String,
+    task_route: Option<&TaskRoute>,
+    reason: &str,
+) -> RoutingDecision {
     match task_route.and_then(|route| route.student_model.as_deref()) {
         Some(model_id) => RoutingDecision::Student {
             reason: reason.to_string(),
@@ -234,7 +240,10 @@ mod tests {
     #[test]
     fn extracts_headers_case_insensitively() {
         let mut headers = HeaderMap::new();
-        headers.insert("X-Task-ID", HeaderValue::from_static("email_classification_v1"));
+        headers.insert(
+            "X-Task-ID",
+            HeaderValue::from_static("email_classification_v1"),
+        );
         headers.insert("X-Client-ID", HeaderValue::from_static("crm_backend"));
         headers.insert("X-No-Train", HeaderValue::from_static("true"));
 

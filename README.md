@@ -44,3 +44,19 @@ Modes supportes par le dataplane :
 Si un snapshot pointe vers un modele etudiant absent de `config/example.yaml`,
 DistillForge retombe vers le teacher et journalise
 `student_backend_missing_teacher_fallback`.
+
+## Worker etudiant minimal
+
+Un worker HTTP de test permet de valider le routage student sans modele ML :
+
+```sh
+cargo run --bin student_worker
+```
+
+Par defaut il ecoute sur `127.0.0.1:9100`, expose `/health`, `/infer`,
+`/v1/chat/completions` et `/v1/completions`, et retourne une reponse
+deterministe configurable par variables d'environnement :
+
+```sh
+DISTILLFORGE_STUDENT_RESPONSE="student ok" cargo run --bin student_worker
+```

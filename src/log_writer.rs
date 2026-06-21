@@ -103,9 +103,10 @@ impl JsonlLogWriter {
             quality_mode: input.metadata.quality_mode.clone(),
             input_hash: match self.mode {
                 LogMode::MetadataOnly | LogMode::Disabled => None,
-                LogMode::Redacted | LogMode::FullEncrypted => {
-                    Some(format!("sha256:{}", sha256_hex(input.request_summary.as_bytes())))
-                }
+                LogMode::Redacted | LogMode::FullEncrypted => Some(format!(
+                    "sha256:{}",
+                    sha256_hex(input.request_summary.as_bytes())
+                )),
             },
             teacher_model: input.teacher_model.to_string(),
             selected_model: input.selected_model.to_string(),

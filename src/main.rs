@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use bytes::Bytes;
 use distillforge::config::{load_config, AppConfig, ModelBackendConfig};
 use distillforge::log_writer::{JsonlLogWriter, LogInput};
 use distillforge::metrics::ProxyMetrics;
@@ -7,10 +8,9 @@ use distillforge::routing::{
     RoutingSnapshot,
 };
 use log::{error, info};
+use pingora::http::ResponseHeader;
 use pingora::prelude::*;
 use pingora::proxy::{http_proxy_service, ProxyHttp, Session};
-use pingora::http::ResponseHeader;
-use bytes::Bytes;
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
 
@@ -166,7 +166,11 @@ impl ProxyHttp for DistillProxy {
         }
     }
 
-    async fn upstream_peer(&self, _session: &mut Session, ctx: &mut Self::CTX) -> Result<Box<HttpPeer>> {
+    async fn upstream_peer(
+        &self,
+        _session: &mut Session,
+        ctx: &mut Self::CTX,
+    ) -> Result<Box<HttpPeer>> {
         let backend = ctx
             .selected_backend
             .as_ref()
@@ -291,7 +295,10 @@ fn main() {
     let mut proxy_service = http_proxy_service(&server.configuration, proxy);
     proxy_service.add_tcp(&config.server.listen_addr);
 
-    info!("DistillForge proxy listening on {}", config.server.listen_addr);
+    info!(
+        "DistillForge proxy listening on {}",
+        config.server.listen_addr
+    );
     server.add_service(proxy_service);
     server.run_forever();
 }
@@ -308,7 +315,9 @@ async fn respond_text(session: &mut Session, status: u16, body: &str) -> Result<
     let mut response = ResponseHeader::build(status, Some(2))?;
     response.append_header("Content-Type", "text/plain; charset=utf-8")?;
     response.append_header("Content-Length", body.len().to_string())?;
-    session.write_response_header(Box::new(response), false).await?;
+    session
+        .write_response_header(Box::new(response), false)
+        .await?;
     session
         .write_response_body(Some(Bytes::copy_from_slice(body.as_bytes())), true)
         .await
