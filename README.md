@@ -46,6 +46,11 @@ Si un snapshot pointe vers un modele etudiant absent de `config/example.yaml`,
 DistillForge retombe vers le teacher et journalise
 `student_backend_missing_teacher_fallback`.
 
+Si une route `student` est choisie mais que la connexion au backend etudiant
+echoue, DistillForge retente automatiquement la requete sur le teacher et
+journalise `student_connect_error_teacher_fallback`. Le compteur Prometheus
+`distillforge_fallback_requests_total` expose ces bascules.
+
 ## Worker etudiant minimal
 
 Un worker HTTP de test permet de valider le routage student sans modele ML :

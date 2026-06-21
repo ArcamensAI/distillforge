@@ -8,7 +8,7 @@ use distillforge::routing::{
     decide_route, extract_metadata, load_routing_snapshot, RequestMetadata, RoutingDecision,
     RoutingSnapshot,
 };
-use log::{error, info};
+use log::{error, info, warn};
 use pingora::http::ResponseHeader;
 use pingora::prelude::*;
 use pingora::proxy::{http_proxy_service, ProxyHttp, Session};
@@ -36,6 +36,7 @@ struct RequestContext {
     routing_reason: String,
     selected_backend: Option<ModelBackendConfig>,
     shadow_backend: Option<ModelBackendConfig>,
+    fallback_attempted: bool,
     request_body_bytes: usize,
     response_body_bytes: usize,
     request_body_capture: Vec<u8>,
@@ -66,6 +67,7 @@ impl ProxyHttp for DistillProxy {
             routing_reason: "not_routed".to_string(),
             selected_backend: None,
             shadow_backend: None,
+            fallback_attempted: false,
             request_body_bytes: 0,
             response_body_bytes: 0,
             request_body_capture: Vec::new(),
@@ -256,6 +258,34 @@ impl ProxyHttp for DistillProxy {
             backend.sni.clone(),
         ));
         Ok(peer)
+    }
+
+    fn fail_to_connect(
+        &self,
+        _session: &mut Session,
+        _peer: &HttpPeer,
+        ctx: &mut Self::CTX,
+        error: Box<pingora::Error>,
+    ) -> Box<pingora::Error> {
+        if ctx.routing_decision == "student" && !ctx.fallback_attempted {
+            ctx.fallback_attempted = true;
+            ctx.routing_decision = "teacher".to_string();
+            ctx.routing_reason = "student_connect_error_teacher_fallback".to_string();
+            ctx.selected_model = self.config.teacher.name.clone();
+            ctx.selected_backend = Some(self.config.teacher.clone());
+            self.metrics.inc_fallback();
+            self.metrics.inc_teacher();
+            warn!(
+                "student upstream connection failed; retrying request_id={} on teacher",
+                ctx.metadata.request_id
+            );
+
+            let mut retry_error = error;
+            retry_error.set_retry(true);
+            return retry_error;
+        }
+
+        error
     }
 
     async fn upstream_request_filter(

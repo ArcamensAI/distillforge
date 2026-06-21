@@ -5,6 +5,7 @@ pub struct ProxyMetrics {
     total_requests: AtomicU64,
     teacher_requests: AtomicU64,
     student_requests: AtomicU64,
+    fallback_requests: AtomicU64,
     shadow_requests: AtomicU64,
     shadow_errors: AtomicU64,
     feedback_requests: AtomicU64,
@@ -23,6 +24,10 @@ impl ProxyMetrics {
 
     pub fn inc_student(&self) {
         self.student_requests.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_fallback(&self) {
+        self.fallback_requests.fetch_add(1, Ordering::Relaxed);
     }
 
     pub fn inc_shadow(&self) {
@@ -54,6 +59,8 @@ impl ProxyMetrics {
                 "distillforge_teacher_requests_total {}\n",
                 "# TYPE distillforge_student_requests_total counter\n",
                 "distillforge_student_requests_total {}\n",
+                "# TYPE distillforge_fallback_requests_total counter\n",
+                "distillforge_fallback_requests_total {}\n",
                 "# TYPE distillforge_shadow_requests_total counter\n",
                 "distillforge_shadow_requests_total {}\n",
                 "# TYPE distillforge_shadow_errors_total counter\n",
@@ -68,6 +75,7 @@ impl ProxyMetrics {
             self.total_requests.load(Ordering::Relaxed),
             self.teacher_requests.load(Ordering::Relaxed),
             self.student_requests.load(Ordering::Relaxed),
+            self.fallback_requests.load(Ordering::Relaxed),
             self.shadow_requests.load(Ordering::Relaxed),
             self.shadow_errors.load(Ordering::Relaxed),
             self.feedback_requests.load(Ordering::Relaxed),
@@ -92,6 +100,7 @@ mod tests {
         assert!(rendered.contains("distillforge_requests_total 1"));
         assert!(rendered.contains("distillforge_teacher_requests_total 1"));
         assert!(rendered.contains("distillforge_student_requests_total 0"));
+        assert!(rendered.contains("distillforge_fallback_requests_total 0"));
         assert!(rendered.contains("distillforge_shadow_requests_total 0"));
         assert!(rendered.contains("distillforge_shadow_errors_total 0"));
         assert!(rendered.contains("distillforge_feedback_requests_total 0"));
