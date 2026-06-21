@@ -73,6 +73,18 @@ python3 tools/finops_report.py --logs 'data/logs/*.jsonl'
 Le rapport affiche les volumes, decisions de routage, latences, couts estimes
 et economies estimees par tache et par modele.
 
+## Dataset builder
+
+Les logs redacted eligibles peuvent etre convertis en dataset versionne :
+
+```sh
+python3 tools/build_dataset.py --task-id test_task --logs 'data/logs/*.jsonl'
+```
+
+Le builder filtre les requetes `success` avec `training_eligible=true`,
+deduplique par `input_hash`, produit `train.parquet`, `validation.parquet`,
+`test.parquet` et un `manifest.json`.
+
 ## Logs redacted
 
 En mode `redacted`, DistillForge capture au maximum
