@@ -147,6 +147,14 @@ python3 tools/promote_model.py \
   --min-accuracy 0.95
 ```
 
+Les probes shadow sont journalises dans `logging.shadow_path` avec latence,
+statut HTTP, reponse student redigee et indicateur `response_exact_match`.
+Un rapport de divergence peut etre produit avec :
+
+```sh
+python3 tools/shadow_report.py --logs data/logs/shadow.jsonl
+```
+
 Rollback teacher pour une tache :
 
 ```sh

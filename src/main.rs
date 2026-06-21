@@ -8,18 +8,25 @@ use distillforge::routing::{
     decide_route, extract_metadata, load_routing_snapshot, RequestMetadata, RoutingDecision,
     RoutingSnapshot,
 };
+use distillforge::shadow_log::{ShadowLogInput, ShadowLogWriter};
 use log::{error, info, warn};
 use pingora::http::ResponseHeader;
 use pingora::prelude::*;
 use pingora::proxy::{http_proxy_service, ProxyHttp, Session};
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
-use std::{io::Write, net::TcpStream, thread, time::Duration};
+use std::{
+    io::{Read, Write},
+    net::TcpStream,
+    thread,
+    time::Duration,
+};
 
 #[derive(Clone)]
 struct DistillProxy {
     config: Arc<AppConfig>,
     logs: Arc<JsonlLogWriter>,
+    shadow_logs: Arc<ShadowLogWriter>,
     feedback: Arc<FeedbackWriter>,
     metrics: Arc<ProxyMetrics>,
     routing_snapshot: Arc<RwLock<RoutingSnapshot>>,
@@ -390,9 +397,14 @@ impl ProxyHttp for DistillProxy {
                 self.metrics.inc_shadow();
                 spawn_shadow_request(
                     Arc::clone(&self.metrics),
+                    Arc::clone(&self.shadow_logs),
                     shadow_backend,
                     session.req_header().uri.path().to_string(),
+                    ctx.metadata.request_id.clone(),
+                    ctx.task_id.clone(),
+                    ctx.response_body_capture.clone(),
                     ctx.request_body_capture.clone(),
+                    self.config.logging.max_capture_bytes,
                 );
             }
         }
@@ -414,6 +426,13 @@ fn main() {
     };
 
     let logs = match JsonlLogWriter::new(&config.logging.path, config.logging.mode) {
+        Ok(logs) => Arc::new(logs),
+        Err(err) => {
+            error!("{err}");
+            std::process::exit(1);
+        }
+    };
+    let shadow_logs = match ShadowLogWriter::new(&config.logging.shadow_path, config.logging.mode) {
         Ok(logs) => Arc::new(logs),
         Err(err) => {
             error!("{err}");
@@ -448,6 +467,7 @@ fn main() {
     let proxy = DistillProxy {
         config: Arc::clone(&config),
         logs,
+        shadow_logs,
         feedback,
         metrics,
         routing_snapshot,
@@ -497,22 +517,75 @@ fn append_capture(capture: &mut Vec<u8>, chunk: &[u8], max_capture_bytes: usize)
 
 fn spawn_shadow_request(
     metrics: Arc<ProxyMetrics>,
+    shadow_logs: Arc<ShadowLogWriter>,
     backend: ModelBackendConfig,
     path: String,
+    request_id: String,
+    task_id: String,
+    teacher_response_body: Vec<u8>,
     body: Vec<u8>,
+    max_capture_bytes: usize,
 ) {
     thread::spawn(move || {
-        if backend.use_tls || send_shadow_request(&backend, &path, &body).is_err() {
-            metrics.inc_shadow_error();
+        let started_at = Instant::now();
+        let result = if backend.use_tls {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "tls shadow requests are not supported yet",
+            ))
+        } else {
+            send_shadow_request(&backend, &path, &body, max_capture_bytes)
+        };
+
+        match result {
+            Ok(response) => {
+                let error_code = if response.status < 400 {
+                    None
+                } else {
+                    metrics.inc_shadow_error();
+                    Some("shadow_http_status")
+                };
+                shadow_logs.write(ShadowLogInput {
+                    request_id: &request_id,
+                    task_id: &task_id,
+                    student_model: &backend.name,
+                    path: &path,
+                    latency: started_at.elapsed(),
+                    http_status: Some(response.status),
+                    error_code,
+                    teacher_response_body: &teacher_response_body,
+                    student_response_body: &response.body,
+                });
+            }
+            Err(_) => {
+                metrics.inc_shadow_error();
+                shadow_logs.write(ShadowLogInput {
+                    request_id: &request_id,
+                    task_id: &task_id,
+                    student_model: &backend.name,
+                    path: &path,
+                    latency: started_at.elapsed(),
+                    http_status: None,
+                    error_code: Some("shadow_request_failed"),
+                    teacher_response_body: &teacher_response_body,
+                    student_response_body: &[],
+                });
+            }
         }
     });
+}
+
+struct ShadowHttpResponse {
+    status: u16,
+    body: Vec<u8>,
 }
 
 fn send_shadow_request(
     backend: &ModelBackendConfig,
     path: &str,
     body: &[u8],
-) -> std::io::Result<()> {
+    max_capture_bytes: usize,
+) -> std::io::Result<ShadowHttpResponse> {
     let mut stream = TcpStream::connect(&backend.address)?;
     stream.set_read_timeout(Some(Duration::from_secs(5)))?;
     stream.set_write_timeout(Some(Duration::from_secs(5)))?;
@@ -523,7 +596,42 @@ fn send_shadow_request(
         body.len()
     )?;
     stream.write_all(body)?;
-    Ok(())
+    stream.flush()?;
+
+    let mut response = Vec::new();
+    let read_limit = (max_capture_bytes + 8192) as u64;
+    stream.take(read_limit).read_to_end(&mut response)?;
+    parse_shadow_response(&response, max_capture_bytes)
+}
+
+fn parse_shadow_response(
+    response: &[u8],
+    max_capture_bytes: usize,
+) -> std::io::Result<ShadowHttpResponse> {
+    let Some(header_end) = response.windows(4).position(|window| window == b"\r\n\r\n") else {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "shadow response missing header terminator",
+        ));
+    };
+    let header = String::from_utf8_lossy(&response[..header_end]);
+    let status = header
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|status| status.parse::<u16>().ok())
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "shadow response missing HTTP status",
+            )
+        })?;
+    let body_start = header_end + 4;
+    let body_end = response.len().min(body_start + max_capture_bytes);
+    Ok(ShadowHttpResponse {
+        status,
+        body: response[body_start..body_end].to_vec(),
+    })
 }
 
 async fn read_limited_body(session: &mut Session, max_bytes: usize) -> Result<Vec<u8>> {
