@@ -32,6 +32,10 @@ pub struct ModelBackendConfig {
     pub sni: String,
     #[serde(default)]
     pub host_header: Option<String>,
+    #[serde(default)]
+    pub input_cost_per_million_tokens_usd: f64,
+    #[serde(default)]
+    pub output_cost_per_million_tokens_usd: f64,
 }
 
 #[derive(Debug, Clone, Deserialize)]

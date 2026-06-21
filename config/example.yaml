@@ -8,6 +8,8 @@ teacher:
   use_tls: false
   sni: ""
   host_header: "127.0.0.1:9000"
+  input_cost_per_million_tokens_usd: 5.0
+  output_cost_per_million_tokens_usd: 15.0
 
 students:
   - name: "local_student"
@@ -15,6 +17,8 @@ students:
     use_tls: false
     sni: ""
     host_header: "127.0.0.1:9100"
+    input_cost_per_million_tokens_usd: 0.05
+    output_cost_per_million_tokens_usd: 0.05
 
 logging:
   path: "data/logs/proxy.jsonl"

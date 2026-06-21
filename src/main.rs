@@ -32,6 +32,8 @@ struct RequestContext {
     routing_decision: String,
     routing_reason: String,
     selected_backend: Option<ModelBackendConfig>,
+    request_body_bytes: usize,
+    response_body_bytes: usize,
     skip_interaction_log: bool,
 }
 
@@ -57,6 +59,8 @@ impl ProxyHttp for DistillProxy {
             routing_decision: "none".to_string(),
             routing_reason: "not_routed".to_string(),
             selected_backend: None,
+            request_body_bytes: 0,
+            response_body_bytes: 0,
             skip_interaction_log: false,
         }
     }
@@ -166,6 +170,22 @@ impl ProxyHttp for DistillProxy {
         }
     }
 
+    async fn request_body_filter(
+        &self,
+        _session: &mut Session,
+        body: &mut Option<Bytes>,
+        _end_of_stream: bool,
+        ctx: &mut Self::CTX,
+    ) -> Result<()>
+    where
+        Self::CTX: Send + Sync,
+    {
+        if let Some(body) = body {
+            ctx.request_body_bytes += body.len();
+        }
+        Ok(())
+    }
+
     async fn upstream_peer(
         &self,
         _session: &mut Session,
@@ -202,6 +222,22 @@ impl ProxyHttp for DistillProxy {
         Ok(())
     }
 
+    fn response_body_filter(
+        &self,
+        _session: &mut Session,
+        body: &mut Option<Bytes>,
+        _end_of_stream: bool,
+        ctx: &mut Self::CTX,
+    ) -> Result<Option<std::time::Duration>>
+    where
+        Self::CTX: Send + Sync,
+    {
+        if let Some(body) = body {
+            ctx.response_body_bytes += body.len();
+        }
+        Ok(None)
+    }
+
     async fn logging(
         &self,
         session: &mut Session,
@@ -231,6 +267,14 @@ impl ProxyHttp for DistillProxy {
         } else {
             None
         };
+        let input_tokens = estimate_tokens(ctx.request_body_bytes);
+        let output_tokens = estimate_tokens(ctx.response_body_bytes);
+        let selected_backend = ctx.selected_backend.as_ref();
+        let estimated_cost_usd = selected_backend
+            .map(|backend| estimate_cost_usd(backend, input_tokens, output_tokens))
+            .unwrap_or(0.0);
+        let estimated_teacher_cost_usd =
+            estimate_cost_usd(&self.config.teacher, input_tokens, output_tokens);
 
         self.logs.write(LogInput {
             metadata: &ctx.metadata,
@@ -240,6 +284,10 @@ impl ProxyHttp for DistillProxy {
             routing_decision: &ctx.routing_decision,
             routing_reason: &ctx.routing_reason,
             latency: ctx.started_at.elapsed(),
+            input_tokens,
+            output_tokens,
+            estimated_cost_usd,
+            estimated_teacher_cost_usd,
             http_status: status,
             error_code,
             request_summary: &request_summary,
@@ -309,6 +357,22 @@ fn student_backend(config: &AppConfig, model_id: &str) -> Option<ModelBackendCon
         .iter()
         .find(|backend| backend.name == model_id)
         .cloned()
+}
+
+fn estimate_tokens(bytes: usize) -> u64 {
+    if bytes == 0 {
+        0
+    } else {
+        bytes.div_ceil(4) as u64
+    }
+}
+
+fn estimate_cost_usd(backend: &ModelBackendConfig, input_tokens: u64, output_tokens: u64) -> f64 {
+    let input_cost =
+        (input_tokens as f64 / 1_000_000.0) * backend.input_cost_per_million_tokens_usd;
+    let output_cost =
+        (output_tokens as f64 / 1_000_000.0) * backend.output_cost_per_million_tokens_usd;
+    input_cost + output_cost
 }
 
 async fn respond_text(session: &mut Session, status: u16, body: &str) -> Result<()> {

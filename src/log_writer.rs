@@ -45,6 +45,11 @@ pub struct InteractionLog {
     routing_decision: String,
     routing_reason: String,
     latency_ms: u128,
+    input_tokens: u64,
+    output_tokens: u64,
+    estimated_cost_usd: f64,
+    estimated_teacher_cost_usd: f64,
+    estimated_savings_usd: f64,
     status: String,
     http_status: u16,
     error_code: Option<String>,
@@ -60,6 +65,10 @@ pub struct LogInput<'a> {
     pub routing_decision: &'a str,
     pub routing_reason: &'a str,
     pub latency: Duration,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub estimated_cost_usd: f64,
+    pub estimated_teacher_cost_usd: f64,
     pub http_status: u16,
     pub error_code: Option<&'a str>,
     pub request_summary: &'a str,
@@ -113,6 +122,12 @@ impl JsonlLogWriter {
             routing_decision: input.routing_decision.to_string(),
             routing_reason: input.routing_reason.to_string(),
             latency_ms: input.latency.as_millis(),
+            input_tokens: input.input_tokens,
+            output_tokens: input.output_tokens,
+            estimated_cost_usd: input.estimated_cost_usd,
+            estimated_teacher_cost_usd: input.estimated_teacher_cost_usd,
+            estimated_savings_usd: (input.estimated_teacher_cost_usd - input.estimated_cost_usd)
+                .max(0.0),
             status: if input.error_code.is_none() && input.http_status < 400 {
                 "success".to_string()
             } else {
@@ -169,6 +184,10 @@ mod tests {
             routing_decision: "teacher",
             routing_reason: "teacher_only_v1",
             latency: Duration::from_millis(12),
+            input_tokens: 16,
+            output_tokens: 4,
+            estimated_cost_usd: 0.001,
+            estimated_teacher_cost_usd: 0.001,
             http_status: 200,
             error_code: None,
             request_summary: "POST /v1/chat/completions",
@@ -177,5 +196,7 @@ mod tests {
         let contents = std::fs::read_to_string(path).unwrap();
         assert!(contents.contains("\"request_id\":\"req_1\""));
         assert!(contents.contains("\"training_eligible\":true"));
+        assert!(contents.contains("\"input_tokens\":16"));
+        assert!(contents.contains("\"estimated_cost_usd\":0.001"));
     }
 }

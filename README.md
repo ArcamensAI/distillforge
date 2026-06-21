@@ -60,3 +60,15 @@ deterministe configurable par variables d'environnement :
 ```sh
 DISTILLFORGE_STUDENT_RESPONSE="student ok" cargo run --bin student_worker
 ```
+
+## Rapport FinOps
+
+Les logs JSONL peuvent etre agreges avec DuckDB :
+
+```sh
+python3 -m pip install -r requirements-analytics.txt
+python3 tools/finops_report.py --logs 'data/logs/*.jsonl'
+```
+
+Le rapport affiche les volumes, decisions de routage, latences, couts estimes
+et economies estimees par tache et par modele.
