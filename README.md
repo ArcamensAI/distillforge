@@ -243,6 +243,28 @@ tokens bearer, cles `sk-*` et champs JSON courants comme `password`, `token`,
 
 En mode `metadata_only`, aucun contenu ni hash d'entree n'est stocke.
 
+## Retention locale
+
+La retention V1 est appliquee par un outil local en dry-run par defaut :
+
+```sh
+python3 tools/retention.py
+```
+
+Seuils par defaut :
+
+- logs proxy : 90 jours ;
+- logs shadow : 90 jours ;
+- feedback : 365 jours ;
+- datasets : 365 jours ;
+- registre/audit : 1095 jours.
+
+Application effective :
+
+```sh
+python3 tools/retention.py --apply
+```
+
 ## Feedback humain
 
 Les clients peuvent envoyer une correction liee a une requete :
