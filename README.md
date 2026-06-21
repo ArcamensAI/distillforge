@@ -38,6 +38,7 @@ curl -X POST http://127.0.0.1:6188/admin/reload-routing
 Modes supportes par le dataplane :
 
 - `teacher_only`
+- `shadow`
 - `student_only`
 - `canary`
 
@@ -119,6 +120,16 @@ python3 tools/promote_model.py \
   --student-traffic-percentage 10 \
   --min-accuracy 0.95
 curl -X POST http://127.0.0.1:6188/admin/reload-routing
+```
+
+Le mode `shadow` sert le client avec le teacher et envoie une copie bornee de
+la requete au student en arriere-plan :
+
+```sh
+python3 tools/promote_model.py \
+  --model-dir models/test_task/student_example \
+  --mode shadow \
+  --min-accuracy 0.95
 ```
 
 Rollback teacher pour une tache :

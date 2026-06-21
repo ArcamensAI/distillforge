@@ -14,6 +14,7 @@ use pingora::prelude::*;
 use pingora::proxy::{http_proxy_service, ProxyHttp, Session};
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
+use std::{io::Write, net::TcpStream, thread, time::Duration};
 
 #[derive(Clone)]
 struct DistillProxy {
@@ -34,6 +35,7 @@ struct RequestContext {
     routing_decision: String,
     routing_reason: String,
     selected_backend: Option<ModelBackendConfig>,
+    shadow_backend: Option<ModelBackendConfig>,
     request_body_bytes: usize,
     response_body_bytes: usize,
     request_body_capture: Vec<u8>,
@@ -63,6 +65,7 @@ impl ProxyHttp for DistillProxy {
             routing_decision: "none".to_string(),
             routing_reason: "not_routed".to_string(),
             selected_backend: None,
+            shadow_backend: None,
             request_body_bytes: 0,
             response_body_bytes: 0,
             request_body_capture: Vec::new(),
@@ -190,6 +193,21 @@ impl ProxyHttp for DistillProxy {
                     Ok(false)
                 }
             },
+            RoutingDecision::Shadow {
+                reason,
+                task_id,
+                model_id,
+            } => {
+                self.metrics.inc_teacher();
+                ctx.task_id = task_id.clone();
+                ctx.routing_reason = reason.clone();
+                ctx.routing_decision = "teacher".to_string();
+                ctx.selected_model = self.config.teacher.name.clone();
+                ctx.selected_backend = Some(self.config.teacher.clone());
+                ctx.shadow_backend = student_backend(&self.config, model_id);
+                ctx.decision = Some(decision);
+                Ok(false)
+            }
             RoutingDecision::Reject { status, reason } => {
                 self.metrics.inc_rejected();
                 ctx.routing_reason = reason.clone();
@@ -336,6 +354,18 @@ impl ProxyHttp for DistillProxy {
             request_body: &ctx.request_body_capture,
             response_body: &ctx.response_body_capture,
         });
+
+        if error.is_none() && status < 500 {
+            if let Some(shadow_backend) = ctx.shadow_backend.clone() {
+                self.metrics.inc_shadow();
+                spawn_shadow_request(
+                    Arc::clone(&self.metrics),
+                    shadow_backend,
+                    session.req_header().uri.path().to_string(),
+                    ctx.request_body_capture.clone(),
+                );
+            }
+        }
     }
 }
 
@@ -433,6 +463,37 @@ fn append_capture(capture: &mut Vec<u8>, chunk: &[u8], max_capture_bytes: usize)
     }
     let remaining = max_capture_bytes - capture.len();
     capture.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
+}
+
+fn spawn_shadow_request(
+    metrics: Arc<ProxyMetrics>,
+    backend: ModelBackendConfig,
+    path: String,
+    body: Vec<u8>,
+) {
+    thread::spawn(move || {
+        if backend.use_tls || send_shadow_request(&backend, &path, &body).is_err() {
+            metrics.inc_shadow_error();
+        }
+    });
+}
+
+fn send_shadow_request(
+    backend: &ModelBackendConfig,
+    path: &str,
+    body: &[u8],
+) -> std::io::Result<()> {
+    let mut stream = TcpStream::connect(&backend.address)?;
+    stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+    stream.set_write_timeout(Some(Duration::from_secs(5)))?;
+    let host = backend.host_header.as_deref().unwrap_or(&backend.address);
+    write!(
+        stream,
+        "POST {path} HTTP/1.1\r\nHost: {host}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\nX-DistillForge-Shadow: true\r\n\r\n",
+        body.len()
+    )?;
+    stream.write_all(body)?;
+    Ok(())
 }
 
 async fn read_limited_body(session: &mut Session, max_bytes: usize) -> Result<Vec<u8>> {

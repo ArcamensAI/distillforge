@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 
-SUPPORTED_MODES = {"teacher_only", "canary", "student_only"}
+SUPPORTED_MODES = {"teacher_only", "shadow", "canary", "student_only"}
 
 
 def main() -> int:

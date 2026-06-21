@@ -26,6 +26,11 @@ pub enum RoutingDecision {
         task_id: String,
         model_id: String,
     },
+    Shadow {
+        reason: String,
+        task_id: String,
+        model_id: String,
+    },
     Reject {
         status: u16,
         reason: String,
@@ -66,6 +71,7 @@ pub struct TaskRoute {
 pub enum RoutingMode {
     TeacherOnly,
     StudentOnly,
+    Shadow,
     Canary,
 }
 
@@ -151,6 +157,7 @@ pub fn decide_route(
             task_id,
         },
         RoutingMode::StudentOnly => choose_student(task_id, task_route, "student_only"),
+        RoutingMode::Shadow => choose_shadow(task_id, task_route),
         RoutingMode::Canary => {
             let percentage = task_route
                 .and_then(|route| route.student_traffic_percentage)
@@ -197,6 +204,20 @@ pub enum RoutingSnapshotError {
         #[source]
         source: serde_json::Error,
     },
+}
+
+fn choose_shadow(task_id: String, task_route: Option<&TaskRoute>) -> RoutingDecision {
+    match task_route.and_then(|route| route.student_model.as_deref()) {
+        Some(model_id) => RoutingDecision::Shadow {
+            reason: "shadow_teacher".to_string(),
+            task_id,
+            model_id: model_id.to_string(),
+        },
+        None => RoutingDecision::Teacher {
+            reason: "shadow_student_unavailable_teacher_fallback".to_string(),
+            task_id,
+        },
+    }
 }
 
 fn choose_student(
@@ -361,6 +382,42 @@ mod tests {
             RoutingDecision::Teacher {
                 reason: "quality_mode_strict".to_string(),
                 task_id: "email_classification_v1".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn routes_shadow_to_teacher_with_student_probe() {
+        let mut tasks = BTreeMap::new();
+        tasks.insert(
+            "email_classification_v1".to_string(),
+            TaskRoute {
+                mode: RoutingMode::Shadow,
+                student_model: Some("local_student".to_string()),
+                student_traffic_percentage: None,
+            },
+        );
+        let snapshot = RoutingSnapshot {
+            version: 1,
+            default_mode: RoutingMode::TeacherOnly,
+            tasks,
+        };
+        let metadata = RequestMetadata {
+            request_id: "req_1".to_string(),
+            client_id: Some("crm_backend".to_string()),
+            task_id: Some("email_classification_v1".to_string()),
+            cost_center: None,
+            quality_mode: None,
+            pii_level: None,
+            no_train: false,
+        };
+
+        assert_eq!(
+            decide_route(&metadata, MissingTaskBehavior::TeacherFallback, &snapshot),
+            RoutingDecision::Shadow {
+                reason: "shadow_teacher".to_string(),
+                task_id: "email_classification_v1".to_string(),
+                model_id: "local_student".to_string()
             }
         );
     }
