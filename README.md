@@ -135,6 +135,34 @@ Ce worker expose `/health`, `/infer`, `/v1/chat/completions` et
 `/v1/completions`, ce qui permet de le declarer comme backend `students` dans
 `config/example.yaml`.
 
+## Control plane local
+
+Un serveur HTTP admin minimal orchestre les scripts V1 sans dependance de
+plateforme externe :
+
+```sh
+python3 tools/control_plane.py --host 127.0.0.1 --port 8090
+```
+
+Endpoints principaux :
+
+- `GET /health`
+- `GET /admin/tasks/{task_id}/status`
+- `GET /admin/models`
+- `GET /admin/models/{model_id}`
+- `POST /admin/tasks/{task_id}/train`
+- `POST /admin/tasks/{task_id}/evaluate`
+- `POST /admin/tasks/{task_id}/promote`
+- `POST /admin/tasks/{task_id}/rollback`
+
+Exemple de promotion shadow via control plane :
+
+```sh
+curl -X POST http://127.0.0.1:8090/admin/tasks/test_task/promote \
+  -H 'Content-Type: application/json' \
+  -d '{"model_dir":"models/test_task/student_example","mode":"shadow","min_accuracy":0.95}'
+```
+
 ## Promotion et rollback
 
 Un modele valide peut mettre a jour le snapshot de routage :
