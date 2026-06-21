@@ -1,0 +1,5 @@
+duckdb
+joblib
+pandas
+pyarrow
+scikit-learn

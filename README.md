@@ -85,6 +85,19 @@ Le builder filtre les requetes `success` avec `training_eligible=true`,
 deduplique par `input_hash`, produit `train.parquet`, `validation.parquet`,
 `test.parquet` et un `manifest.json`.
 
+## Training offline minimal
+
+Un modele etudiant classique peut etre entraine depuis un dataset versionne :
+
+```sh
+python3 -m pip install -r requirements-training.txt
+python3 tools/train_student.py --dataset data/datasets/test_task/ds_example
+```
+
+Le trainer produit `model.joblib`, `eval_report.json` et `manifest.json` sous
+`models/{task_id}/{model_id}`. Il utilise TF-IDF + LogisticRegression lorsque
+le dataset contient plusieurs classes, sinon un baseline `DummyClassifier`.
+
 ## Logs redacted
 
 En mode `redacted`, DistillForge capture au maximum
