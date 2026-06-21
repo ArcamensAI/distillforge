@@ -108,6 +108,28 @@ Ce worker expose `/health`, `/infer`, `/v1/chat/completions` et
 `/v1/completions`, ce qui permet de le declarer comme backend `students` dans
 `config/example.yaml`.
 
+## Promotion et rollback
+
+Un modele valide peut mettre a jour le snapshot de routage :
+
+```sh
+python3 tools/promote_model.py \
+  --model-dir models/test_task/student_example \
+  --mode canary \
+  --student-traffic-percentage 10 \
+  --min-accuracy 0.95
+curl -X POST http://127.0.0.1:6188/admin/reload-routing
+```
+
+Rollback teacher pour une tache :
+
+```sh
+python3 tools/promote_model.py --task-id test_task --mode teacher_only
+curl -X POST http://127.0.0.1:6188/admin/reload-routing
+```
+
+Chaque promotion ajoute un evenement JSONL dans `registry/events.jsonl`.
+
 ## Logs redacted
 
 En mode `redacted`, DistillForge capture au maximum
