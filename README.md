@@ -141,6 +141,36 @@ curl -X POST http://127.0.0.1:6188/admin/reload-routing
 
 Chaque promotion ajoute un evenement JSONL dans `registry/events.jsonl`.
 
+## Drift guard
+
+Un garde-fou local peut analyser les logs recents et detecter une derive simple
+sur les routes `canary` et `student_only` : taux d'erreur student, latence p95
+et feedback humain negatif.
+
+Audit sans modification :
+
+```sh
+python3 tools/drift_guard.py \
+  --logs 'data/logs/*.jsonl' \
+  --feedback data/logs/feedback.jsonl \
+  --window-hours 24
+```
+
+Rollback automatique des taches en derive vers `teacher_only` :
+
+```sh
+python3 tools/drift_guard.py \
+  --logs 'data/logs/*.jsonl' \
+  --feedback data/logs/feedback.jsonl \
+  --max-error-rate 0.05 \
+  --max-negative-feedback-rate 0.20 \
+  --apply
+curl -X POST http://127.0.0.1:6188/admin/reload-routing
+```
+
+Chaque rollback ecrit un evenement `drift_guard_rollback` dans
+`registry/events.jsonl`.
+
 ## Logs redacted
 
 En mode `redacted`, DistillForge capture au maximum
