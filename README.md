@@ -98,6 +98,16 @@ Le trainer produit `model.joblib`, `eval_report.json` et `manifest.json` sous
 `models/{task_id}/{model_id}`. Il utilise TF-IDF + LogisticRegression lorsque
 le dataset contient plusieurs classes, sinon un baseline `DummyClassifier`.
 
+Le modele entraine peut etre servi en HTTP :
+
+```sh
+python3 tools/student_inference.py --model-dir models/test_task/student_example
+```
+
+Ce worker expose `/health`, `/infer`, `/v1/chat/completions` et
+`/v1/completions`, ce qui permet de le declarer comme backend `students` dans
+`config/example.yaml`.
+
 ## Logs redacted
 
 En mode `redacted`, DistillForge capture au maximum
