@@ -51,6 +51,17 @@ echoue, DistillForge retente automatiquement la requete sur le teacher et
 journalise `student_connect_error_teacher_fallback`. Le compteur Prometheus
 `distillforge_fallback_requests_total` expose ces bascules.
 
+Les timeouts upstream sont configurables dans `config/example.yaml` :
+
+```yaml
+timeouts:
+  upstream_connection_timeout_ms: 2000
+  teacher_inference_timeout_ms: 30000
+  student_inference_timeout_ms: 2000
+  upstream_write_timeout_ms: 30000
+  shadow_student_timeout_ms: 5000
+```
+
 ## Worker etudiant minimal
 
 Un worker HTTP de test permet de valider le routage student sans modele ML :

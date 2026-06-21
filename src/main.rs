@@ -16,8 +16,8 @@ use pingora::proxy::{http_proxy_service, ProxyHttp, Session};
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
 use std::{
-    io::{Read, Write},
-    net::TcpStream,
+    io::{self, Read, Write},
+    net::{TcpStream, ToSocketAddrs},
     thread,
     time::Duration,
 };
@@ -259,11 +259,12 @@ impl ProxyHttp for DistillProxy {
             .selected_backend
             .as_ref()
             .unwrap_or(&self.config.teacher);
-        let peer = Box::new(HttpPeer::new(
+        let mut peer = Box::new(HttpPeer::new(
             backend.address.as_str(),
             backend.use_tls,
             backend.sni.clone(),
         ));
+        apply_peer_timeouts(&mut peer, &self.config, ctx.routing_decision == "student");
         Ok(peer)
     }
 
@@ -405,6 +406,7 @@ impl ProxyHttp for DistillProxy {
                     ctx.response_body_capture.clone(),
                     ctx.request_body_capture.clone(),
                     self.config.logging.max_capture_bytes,
+                    self.config.timeouts.shadow_student_timeout_ms,
                 );
             }
         }
@@ -507,6 +509,21 @@ fn estimate_cost_usd(backend: &ModelBackendConfig, input_tokens: u64, output_tok
     input_cost + output_cost
 }
 
+fn apply_peer_timeouts(peer: &mut HttpPeer, config: &AppConfig, is_student: bool) {
+    peer.options.connection_timeout =
+        Some(duration_ms(config.timeouts.upstream_connection_timeout_ms));
+    peer.options.read_timeout = Some(duration_ms(if is_student {
+        config.timeouts.student_inference_timeout_ms
+    } else {
+        config.timeouts.teacher_inference_timeout_ms
+    }));
+    peer.options.write_timeout = Some(duration_ms(config.timeouts.upstream_write_timeout_ms));
+}
+
+fn duration_ms(value: u64) -> Duration {
+    Duration::from_millis(value.max(1))
+}
+
 fn append_capture(capture: &mut Vec<u8>, chunk: &[u8], max_capture_bytes: usize) {
     if capture.len() >= max_capture_bytes {
         return;
@@ -525,16 +542,18 @@ fn spawn_shadow_request(
     teacher_response_body: Vec<u8>,
     body: Vec<u8>,
     max_capture_bytes: usize,
+    timeout_ms: u64,
 ) {
     thread::spawn(move || {
         let started_at = Instant::now();
+        let timeout = duration_ms(timeout_ms);
         let result = if backend.use_tls {
-            Err(std::io::Error::new(
-                std::io::ErrorKind::Unsupported,
+            Err(io::Error::new(
+                io::ErrorKind::Unsupported,
                 "tls shadow requests are not supported yet",
             ))
         } else {
-            send_shadow_request(&backend, &path, &body, max_capture_bytes)
+            send_shadow_request(&backend, &path, &body, max_capture_bytes, timeout)
         };
 
         match result {
@@ -585,10 +604,11 @@ fn send_shadow_request(
     path: &str,
     body: &[u8],
     max_capture_bytes: usize,
-) -> std::io::Result<ShadowHttpResponse> {
-    let mut stream = TcpStream::connect(&backend.address)?;
-    stream.set_read_timeout(Some(Duration::from_secs(5)))?;
-    stream.set_write_timeout(Some(Duration::from_secs(5)))?;
+    timeout: Duration,
+) -> io::Result<ShadowHttpResponse> {
+    let mut stream = connect_with_timeout(&backend.address, timeout)?;
+    stream.set_read_timeout(Some(timeout))?;
+    stream.set_write_timeout(Some(timeout))?;
     let host = backend.host_header.as_deref().unwrap_or(&backend.address);
     write!(
         stream,
@@ -607,10 +627,10 @@ fn send_shadow_request(
 fn parse_shadow_response(
     response: &[u8],
     max_capture_bytes: usize,
-) -> std::io::Result<ShadowHttpResponse> {
+) -> io::Result<ShadowHttpResponse> {
     let Some(header_end) = response.windows(4).position(|window| window == b"\r\n\r\n") else {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
             "shadow response missing header terminator",
         ));
     };
@@ -621,8 +641,8 @@ fn parse_shadow_response(
         .and_then(|line| line.split_whitespace().nth(1))
         .and_then(|status| status.parse::<u16>().ok())
         .ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
+            io::Error::new(
+                io::ErrorKind::InvalidData,
                 "shadow response missing HTTP status",
             )
         })?;
@@ -632,6 +652,17 @@ fn parse_shadow_response(
         status,
         body: response[body_start..body_end].to_vec(),
     })
+}
+
+fn connect_with_timeout(address: &str, timeout: Duration) -> io::Result<TcpStream> {
+    let mut addrs = address.to_socket_addrs()?;
+    let addr = addrs.next().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("backend address {address} resolved to no socket addresses"),
+        )
+    })?;
+    TcpStream::connect_timeout(&addr, timeout)
 }
 
 async fn read_limited_body(session: &mut Session, max_bytes: usize) -> Result<Vec<u8>> {

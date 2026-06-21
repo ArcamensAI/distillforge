@@ -20,6 +20,13 @@ students:
     input_cost_per_million_tokens_usd: 0.05
     output_cost_per_million_tokens_usd: 0.05
 
+timeouts:
+  upstream_connection_timeout_ms: 2000
+  teacher_inference_timeout_ms: 30000
+  student_inference_timeout_ms: 2000
+  upstream_write_timeout_ms: 30000
+  shadow_student_timeout_ms: 5000
+
 logging:
   path: "data/logs/proxy.jsonl"
   feedback_path: "data/logs/feedback.jsonl"

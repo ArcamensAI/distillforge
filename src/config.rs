@@ -8,6 +8,8 @@ pub struct AppConfig {
     pub teacher: TeacherConfig,
     #[serde(default)]
     pub students: Vec<ModelBackendConfig>,
+    #[serde(default)]
+    pub timeouts: TimeoutsConfig,
     pub logging: LoggingConfig,
     pub routing: RoutingConfig,
 }
@@ -49,6 +51,32 @@ pub struct LoggingConfig {
     pub mode: LogMode,
     #[serde(default = "default_max_capture_bytes")]
     pub max_capture_bytes: usize,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct TimeoutsConfig {
+    #[serde(default = "default_upstream_connection_timeout_ms")]
+    pub upstream_connection_timeout_ms: u64,
+    #[serde(default = "default_teacher_inference_timeout_ms")]
+    pub teacher_inference_timeout_ms: u64,
+    #[serde(default = "default_student_inference_timeout_ms")]
+    pub student_inference_timeout_ms: u64,
+    #[serde(default = "default_upstream_write_timeout_ms")]
+    pub upstream_write_timeout_ms: u64,
+    #[serde(default = "default_shadow_student_timeout_ms")]
+    pub shadow_student_timeout_ms: u64,
+}
+
+impl Default for TimeoutsConfig {
+    fn default() -> Self {
+        Self {
+            upstream_connection_timeout_ms: default_upstream_connection_timeout_ms(),
+            teacher_inference_timeout_ms: default_teacher_inference_timeout_ms(),
+            student_inference_timeout_ms: default_student_inference_timeout_ms(),
+            upstream_write_timeout_ms: default_upstream_write_timeout_ms(),
+            shadow_student_timeout_ms: default_shadow_student_timeout_ms(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -141,6 +169,26 @@ fn default_max_capture_bytes() -> usize {
     64 * 1024
 }
 
+fn default_upstream_connection_timeout_ms() -> u64 {
+    2_000
+}
+
+fn default_teacher_inference_timeout_ms() -> u64 {
+    30_000
+}
+
+fn default_student_inference_timeout_ms() -> u64 {
+    2_000
+}
+
+fn default_upstream_write_timeout_ms() -> u64 {
+    30_000
+}
+
+fn default_shadow_student_timeout_ms() -> u64 {
+    5_000
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -152,6 +200,10 @@ mod tests {
         assert_eq!(config.server.listen_addr, "127.0.0.1:6188");
         assert_eq!(config.teacher.address, "127.0.0.1:9000");
         assert_eq!(config.students.len(), 1);
+        assert_eq!(config.timeouts.upstream_connection_timeout_ms, 2_000);
+        assert_eq!(config.timeouts.teacher_inference_timeout_ms, 30_000);
+        assert_eq!(config.timeouts.student_inference_timeout_ms, 2_000);
+        assert_eq!(config.timeouts.shadow_student_timeout_ms, 5_000);
         assert_eq!(config.routing.snapshot_path, "config/routing_snapshot.json");
         assert_eq!(config.logging.mode, LogMode::Redacted);
         assert_eq!(config.logging.feedback_path, "data/logs/feedback.jsonl");
