@@ -72,6 +72,8 @@ python3 tools/groq_teacher.py \
 
 L'adaptateur expose `/v1/chat/completions`, appelle Groq, force la sortie sur
 une des 77 intentions, puis renvoie une reponse OpenAI-compatible stable.
+Pour les modeles GPT-OSS, il utilise `reasoning_format: hidden` afin que les
+tokens de raisonnement ne remplacent pas le label final.
 
 ## Proxy DistillForge
 

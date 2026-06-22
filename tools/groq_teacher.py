@@ -169,7 +169,9 @@ def classify_with_groq(
     payload = {
         "model": model,
         "temperature": 0,
-        "max_tokens": 24,
+        "max_completion_tokens": 64,
+        "reasoning_format": "hidden",
+        "reasoning_effort": "low",
         "messages": [
             {
                 "role": "system",
@@ -196,6 +198,8 @@ def classify_with_groq(
         headers={
             "authorization": f"Bearer {api_key}",
             "content-type": "application/json",
+            "accept": "application/json",
+            "user-agent": "distillforge-groq-teacher/0.1",
         },
         method="POST",
     )

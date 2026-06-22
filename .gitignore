@@ -3,3 +3,7 @@
 /data/logs/
 /models/
 /registry/
+.env
+examples/*/data/
+examples/*/models/
+examples/*/registry/
