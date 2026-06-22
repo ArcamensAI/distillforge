@@ -265,6 +265,27 @@ Application effective :
 python3 tools/retention.py --apply
 ```
 
+## Deploiement
+
+Images conteneur :
+
+```sh
+docker build -f Dockerfile.proxy -t distillforge/proxy:0.1.0 .
+docker build -f Dockerfile.control-plane -t distillforge/control-plane:0.1.0 .
+```
+
+Manifests Kubernetes statiques :
+
+```sh
+kubectl apply -f deploy/kubernetes/distillforge.yaml
+```
+
+Le manifeste cree un namespace `distillforge`, un PVC pour les logs/datasets/
+modeles/registre, deux replicas du proxy, un control plane local et les services
+HTTP associes. Le snapshot de routage est initialise depuis le ConfigMap puis
+stocke dans `/data/config/routing_snapshot.json` pour permettre les promotions
+et rollbacks.
+
 ## Feedback humain
 
 Les clients peuvent envoyer une correction liee a une requete :

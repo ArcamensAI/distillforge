@@ -1,0 +1,22 @@
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV DISTILLFORGE_LOGS=/data/logs/*.jsonl
+ENV DISTILLFORGE_DATASETS_ROOT=/data/datasets
+ENV DISTILLFORGE_MODELS_ROOT=/data/models
+ENV DISTILLFORGE_ROUTING_SNAPSHOT=/data/config/routing_snapshot.json
+ENV DISTILLFORGE_REGISTRY=/data/registry/events.jsonl
+
+WORKDIR /app
+COPY requirements-analytics.txt requirements-training.txt ./
+RUN pip install --no-cache-dir \
+    -r requirements-analytics.txt \
+    -r requirements-training.txt
+
+COPY tools ./tools
+COPY config ./config
+
+EXPOSE 8090
+
+CMD ["python", "tools/control_plane.py", "--host", "0.0.0.0", "--port", "8090"]

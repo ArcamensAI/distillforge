@@ -1,0 +1,243 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: distillforge
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: distillforge-data
+  namespace: distillforge
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: distillforge-config
+  namespace: distillforge
+data:
+  config.yaml: |
+    server:
+      listen_addr: "0.0.0.0:6188"
+      metrics_addr: "0.0.0.0:6192"
+
+    teacher:
+      name: "teacher"
+      address: "teacher.default.svc.cluster.local:9000"
+      use_tls: false
+      sni: ""
+      host_header: "teacher.default.svc.cluster.local:9000"
+      input_cost_per_million_tokens_usd: 5.0
+      output_cost_per_million_tokens_usd: 15.0
+
+    students:
+      - name: "local_student"
+        address: "distillforge-student.distillforge.svc.cluster.local:9100"
+        use_tls: false
+        sni: ""
+        host_header: "distillforge-student.distillforge.svc.cluster.local:9100"
+        input_cost_per_million_tokens_usd: 0.05
+        output_cost_per_million_tokens_usd: 0.05
+
+    timeouts:
+      upstream_connection_timeout_ms: 2000
+      teacher_inference_timeout_ms: 30000
+      student_inference_timeout_ms: 2000
+      upstream_write_timeout_ms: 30000
+      shadow_student_timeout_ms: 5000
+
+    logging:
+      path: "/data/logs/proxy.jsonl"
+      feedback_path: "/data/logs/feedback.jsonl"
+      shadow_path: "/data/logs/shadow.jsonl"
+      mode: "redacted"
+      max_capture_bytes: 65536
+
+    routing:
+      default_missing_task_behavior: "teacher_fallback"
+      snapshot_path: "/data/config/routing_snapshot.json"
+  routing_snapshot.json: |
+    {
+      "version": 1,
+      "default_mode": "teacher_only",
+      "tasks": {}
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: distillforge-proxy
+  namespace: distillforge
+  labels:
+    app: distillforge-proxy
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: distillforge-proxy
+  template:
+    metadata:
+      labels:
+        app: distillforge-proxy
+    spec:
+      initContainers:
+        - name: seed-routing-snapshot
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              mkdir -p /data/config /data/logs /data/datasets /data/models /data/registry
+              if [ ! -f /data/config/routing_snapshot.json ]; then
+                cp /seed/routing_snapshot.json /data/config/routing_snapshot.json
+              fi
+          volumeMounts:
+            - name: config
+              mountPath: /seed
+              readOnly: true
+            - name: data
+              mountPath: /data
+      containers:
+        - name: proxy
+          image: distillforge/proxy:0.1.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: DISTILLFORGE_CONFIG
+              value: /etc/distillforge/config.yaml
+          ports:
+            - name: http
+              containerPort: 6188
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          volumeMounts:
+            - name: config
+              mountPath: /etc/distillforge
+              readOnly: true
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: config
+          configMap:
+            name: distillforge-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: distillforge-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: distillforge-proxy
+  namespace: distillforge
+spec:
+  selector:
+    app: distillforge-proxy
+  ports:
+    - name: http
+      port: 6188
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: distillforge-control-plane
+  namespace: distillforge
+  labels:
+    app: distillforge-control-plane
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: distillforge-control-plane
+  template:
+    metadata:
+      labels:
+        app: distillforge-control-plane
+    spec:
+      initContainers:
+        - name: seed-data-dirs
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              mkdir -p /data/config /data/logs /data/datasets /data/models /data/registry
+              if [ ! -f /data/config/routing_snapshot.json ]; then
+                cp /seed/routing_snapshot.json /data/config/routing_snapshot.json
+              fi
+          volumeMounts:
+            - name: config
+              mountPath: /seed
+              readOnly: true
+            - name: data
+              mountPath: /data
+      containers:
+        - name: control-plane
+          image: distillforge/control-plane:0.1.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: DISTILLFORGE_LOGS
+              value: /data/logs/*.jsonl
+            - name: DISTILLFORGE_DATASETS_ROOT
+              value: /data/datasets
+            - name: DISTILLFORGE_MODELS_ROOT
+              value: /data/models
+            - name: DISTILLFORGE_ROUTING_SNAPSHOT
+              value: /data/config/routing_snapshot.json
+            - name: DISTILLFORGE_REGISTRY
+              value: /data/registry/events.jsonl
+          ports:
+            - name: http
+              containerPort: 8090
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          volumeMounts:
+            - name: config
+              mountPath: /app/config
+              readOnly: true
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: config
+          configMap:
+            name: distillforge-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: distillforge-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: distillforge-control-plane
+  namespace: distillforge
+spec:
+  selector:
+    app: distillforge-control-plane
+  ports:
+    - name: http
+      port: 8090
+      targetPort: http

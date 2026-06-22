@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -48,11 +49,14 @@ class ControlPlaneHandler(BaseHTTPRequestHandler):
             return
 
         if segments == ["admin", "models"]:
-            self.write_json(HTTPStatus.OK, {"models": list_models(path_arg(query, "models_root", "models"))})
+            self.write_json(
+                HTTPStatus.OK,
+                {"models": list_models(path_arg(query, "models_root", default_models_root()))},
+            )
             return
 
         if len(segments) == 3 and segments[:2] == ["admin", "models"]:
-            model = find_model(segments[2], path_arg(query, "models_root", "models"))
+            model = find_model(segments[2], path_arg(query, "models_root", default_models_root()))
             if model is None:
                 self.write_json(HTTPStatus.NOT_FOUND, {"error": "model_not_found"})
                 return
@@ -64,10 +68,10 @@ class ControlPlaneHandler(BaseHTTPRequestHandler):
                 HTTPStatus.OK,
                 task_status(
                     segments[2],
-                    path_arg(query, "snapshot", "config/routing_snapshot.json"),
-                    path_arg(query, "datasets_root", "data/datasets"),
-                    path_arg(query, "models_root", "models"),
-                    query.get("logs", "data/logs/*.jsonl"),
+                    path_arg(query, "snapshot", default_snapshot_path()),
+                    path_arg(query, "datasets_root", default_datasets_root()),
+                    path_arg(query, "models_root", default_models_root()),
+                    query.get("logs", default_logs_path()),
                 ),
             )
             return
@@ -147,9 +151,9 @@ class ControlPlaneHandler(BaseHTTPRequestHandler):
 
 
 def train_task(task_id: str, payload: dict[str, Any], query: dict[str, str]) -> dict[str, Any]:
-    datasets_root = path_arg(query | payload, "datasets_root", "data/datasets")
-    models_root = path_arg(query | payload, "models_root", "models")
-    logs = str_arg(query | payload, "logs", "data/logs/*.jsonl")
+    datasets_root = path_arg(query | payload, "datasets_root", default_datasets_root())
+    models_root = path_arg(query | payload, "models_root", default_models_root())
+    logs = str_arg(query | payload, "logs", default_logs_path())
     dataset_id = str_arg(payload, "dataset_id", "")
     min_samples = int_arg(payload, "min_samples", 1)
     min_train_samples = int_arg(payload, "min_train_samples", 1)
@@ -188,7 +192,7 @@ def train_task(task_id: str, payload: dict[str, Any], query: dict[str, str]) -> 
     model_dir = latest_child_dir(models_root / task_id)
 
     append_control_event(
-        path_arg(query | payload, "registry", "registry/events.jsonl"),
+        path_arg(query | payload, "registry", default_registry_path()),
         {
             "event": "control_plane_train",
             "task_id": task_id,
@@ -245,9 +249,9 @@ def promote_task(task_id: str, payload: dict[str, Any], query: dict[str, str]) -
         "--mode",
         mode,
         "--snapshot",
-        str(path_arg(query | payload, "snapshot", "config/routing_snapshot.json")),
+        str(path_arg(query | payload, "snapshot", default_snapshot_path())),
         "--registry",
-        str(path_arg(query | payload, "registry", "registry/events.jsonl")),
+        str(path_arg(query | payload, "registry", default_registry_path())),
         "--student-traffic-percentage",
         str(int_arg(payload, "student_traffic_percentage", 1)),
         "--min-accuracy",
@@ -268,9 +272,9 @@ def rollback_task(task_id: str, payload: dict[str, Any], query: dict[str, str]) 
         "--mode",
         "teacher_only",
         "--snapshot",
-        str(path_arg(query | payload, "snapshot", "config/routing_snapshot.json")),
+        str(path_arg(query | payload, "snapshot", default_snapshot_path())),
         "--registry",
-        str(path_arg(query | payload, "registry", "registry/events.jsonl")),
+        str(path_arg(query | payload, "registry", default_registry_path())),
     ]
     result = run_command(command)
     return {"status": "completed", "task_id": task_id, "mode": "teacher_only", "rollback": result}
@@ -392,7 +396,7 @@ def model_dir_arg(task_id: str, payload: dict[str, Any], query: dict[str, str]) 
     if "model_dir" in query:
         return Path(query["model_dir"])
     model_id = str_arg(query | payload, "model_id", "")
-    models_root = path_arg(query | payload, "models_root", "models")
+    models_root = path_arg(query | payload, "models_root", default_models_root())
     if model_id:
         return models_root / task_id / model_id
     return latest_child_dir(models_root / task_id)
@@ -439,6 +443,26 @@ def int_arg(values: dict[str, Any], name: str, default: int) -> int:
 
 def float_arg(values: dict[str, Any], name: str, default: float) -> float:
     return float(values.get(name, default))
+
+
+def default_logs_path() -> str:
+    return os.environ.get("DISTILLFORGE_LOGS", "data/logs/*.jsonl")
+
+
+def default_datasets_root() -> str:
+    return os.environ.get("DISTILLFORGE_DATASETS_ROOT", "data/datasets")
+
+
+def default_models_root() -> str:
+    return os.environ.get("DISTILLFORGE_MODELS_ROOT", "models")
+
+
+def default_snapshot_path() -> str:
+    return os.environ.get("DISTILLFORGE_ROUTING_SNAPSHOT", "config/routing_snapshot.json")
+
+
+def default_registry_path() -> str:
+    return os.environ.get("DISTILLFORGE_REGISTRY", "registry/events.jsonl")
 
 
 def sql_string_literal(value: str) -> str:
