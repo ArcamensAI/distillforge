@@ -37,3 +37,12 @@ logging:
 routing:
   default_missing_task_behavior: "teacher_fallback"
   snapshot_path: "config/routing_snapshot.json"
+
+rate_limits:
+  enabled: true
+  window_ms: 60000
+  default_requests_per_window: 120
+  clients:
+    crm_backend: 600
+  tasks:
+    email_classification_v1: 300

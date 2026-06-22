@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
@@ -12,6 +13,8 @@ pub struct AppConfig {
     pub timeouts: TimeoutsConfig,
     pub logging: LoggingConfig,
     pub routing: RoutingConfig,
+    #[serde(default)]
+    pub rate_limits: RateLimitsConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -85,6 +88,32 @@ pub struct RoutingConfig {
     pub default_missing_task_behavior: MissingTaskBehavior,
     #[serde(default = "default_snapshot_path")]
     pub snapshot_path: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Eq, PartialEq)]
+pub struct RateLimitsConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_rate_limit_window_ms")]
+    pub window_ms: u64,
+    #[serde(default)]
+    pub default_requests_per_window: Option<u64>,
+    #[serde(default)]
+    pub clients: BTreeMap<String, u64>,
+    #[serde(default)]
+    pub tasks: BTreeMap<String, u64>,
+}
+
+impl Default for RateLimitsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            window_ms: default_rate_limit_window_ms(),
+            default_requests_per_window: None,
+            clients: BTreeMap::new(),
+            tasks: BTreeMap::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Eq, PartialEq)]
@@ -189,6 +218,10 @@ fn default_shadow_student_timeout_ms() -> u64 {
     5_000
 }
 
+fn default_rate_limit_window_ms() -> u64 {
+    60_000
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -212,6 +245,21 @@ mod tests {
         assert_eq!(
             config.routing.default_missing_task_behavior,
             MissingTaskBehavior::TeacherFallback
+        );
+        assert!(config.rate_limits.enabled);
+        assert_eq!(config.rate_limits.window_ms, 60_000);
+        assert_eq!(config.rate_limits.default_requests_per_window, Some(120));
+        assert_eq!(
+            config.rate_limits.clients.get("crm_backend").copied(),
+            Some(600)
+        );
+        assert_eq!(
+            config
+                .rate_limits
+                .tasks
+                .get("email_classification_v1")
+                .copied(),
+            Some(300)
         );
     }
 }

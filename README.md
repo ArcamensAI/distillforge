@@ -62,6 +62,28 @@ timeouts:
   shadow_student_timeout_ms: 5000
 ```
 
+## Limitation de debit locale
+
+DistillForge peut appliquer une limitation de debit en memoire, sans service
+tiers, avant d'appeler les backends LLM. La limite par defaut s'applique par
+`X-Client-ID`; des limites specifiques peuvent etre posees par client ou par
+tache :
+
+```yaml
+rate_limits:
+  enabled: true
+  window_ms: 60000
+  default_requests_per_window: 120
+  clients:
+    crm_backend: 600
+  tasks:
+    email_classification_v1: 300
+```
+
+Une requete au-dessus du seuil est refusee en `429` avec le motif
+`rate_limited_client` ou `rate_limited_task` dans les logs. Le compteur
+Prometheus `distillforge_rate_limited_requests_total` expose ces refus.
+
 ## Worker etudiant minimal
 
 Un worker HTTP de test permet de valider le routage student sans modele ML :

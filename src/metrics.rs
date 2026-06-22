@@ -10,6 +10,7 @@ pub struct ProxyMetrics {
     shadow_errors: AtomicU64,
     feedback_requests: AtomicU64,
     rejected_requests: AtomicU64,
+    rate_limited_requests: AtomicU64,
     upstream_errors: AtomicU64,
 }
 
@@ -46,6 +47,10 @@ impl ProxyMetrics {
         self.rejected_requests.fetch_add(1, Ordering::Relaxed);
     }
 
+    pub fn inc_rate_limited(&self) {
+        self.rate_limited_requests.fetch_add(1, Ordering::Relaxed);
+    }
+
     pub fn inc_upstream_error(&self) {
         self.upstream_errors.fetch_add(1, Ordering::Relaxed);
     }
@@ -69,6 +74,8 @@ impl ProxyMetrics {
                 "distillforge_feedback_requests_total {}\n",
                 "# TYPE distillforge_rejected_requests_total counter\n",
                 "distillforge_rejected_requests_total {}\n",
+                "# TYPE distillforge_rate_limited_requests_total counter\n",
+                "distillforge_rate_limited_requests_total {}\n",
                 "# TYPE distillforge_upstream_errors_total counter\n",
                 "distillforge_upstream_errors_total {}\n"
             ),
@@ -80,6 +87,7 @@ impl ProxyMetrics {
             self.shadow_errors.load(Ordering::Relaxed),
             self.feedback_requests.load(Ordering::Relaxed),
             self.rejected_requests.load(Ordering::Relaxed),
+            self.rate_limited_requests.load(Ordering::Relaxed),
             self.upstream_errors.load(Ordering::Relaxed)
         )
     }
@@ -104,5 +112,6 @@ mod tests {
         assert!(rendered.contains("distillforge_shadow_requests_total 0"));
         assert!(rendered.contains("distillforge_shadow_errors_total 0"));
         assert!(rendered.contains("distillforge_feedback_requests_total 0"));
+        assert!(rendered.contains("distillforge_rate_limited_requests_total 0"));
     }
 }

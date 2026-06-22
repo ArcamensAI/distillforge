@@ -4,6 +4,7 @@ use distillforge::config::{load_config, AppConfig, ModelBackendConfig};
 use distillforge::feedback::FeedbackWriter;
 use distillforge::log_writer::{JsonlLogWriter, LogInput};
 use distillforge::metrics::ProxyMetrics;
+use distillforge::rate_limit::RateLimiter;
 use distillforge::routing::{
     decide_route, extract_metadata, load_routing_snapshot, RequestMetadata, RoutingDecision,
     RoutingSnapshot,
@@ -29,6 +30,7 @@ struct DistillProxy {
     shadow_logs: Arc<ShadowLogWriter>,
     feedback: Arc<FeedbackWriter>,
     metrics: Arc<ProxyMetrics>,
+    rate_limiter: Arc<RateLimiter>,
     routing_snapshot: Arc<RwLock<RoutingSnapshot>>,
 }
 
@@ -151,6 +153,22 @@ impl ProxyHttp for DistillProxy {
         }
 
         ctx.metadata = extract_metadata(&session.req_header().headers);
+        let rate_limit = self.rate_limiter.check(&ctx.metadata);
+        if !rate_limit.allowed {
+            self.metrics.inc_rejected();
+            self.metrics.inc_rate_limited();
+            ctx.task_id = ctx
+                .metadata
+                .task_id
+                .clone()
+                .unwrap_or_else(|| "unknown_task".to_string());
+            ctx.routing_reason = rate_limit.reason.unwrap_or("rate_limited").to_string();
+            ctx.routing_decision = "reject".to_string();
+            ctx.selected_model = "none".to_string();
+            respond_text(session, 429, "rate limit exceeded\n").await?;
+            return Ok(true);
+        }
+
         let snapshot = self
             .routing_snapshot
             .read()
@@ -449,6 +467,7 @@ fn main() {
         }
     };
     let metrics = Arc::new(ProxyMetrics::default());
+    let rate_limiter = Arc::new(RateLimiter::new(config.rate_limits.clone()));
     let routing_snapshot = match load_routing_snapshot(&config.routing.snapshot_path) {
         Ok(snapshot) => {
             info!(
@@ -472,6 +491,7 @@ fn main() {
         shadow_logs,
         feedback,
         metrics,
+        rate_limiter,
         routing_snapshot,
     };
     let mut proxy_service = http_proxy_service(&server.configuration, proxy);
