@@ -6,6 +6,7 @@ Proxy FinOps pour LLM.
 
 - [Specifications fonctionnelles](specs.md)
 - [Architecture technique](ARCHITECTURE.md)
+- [Demo Groq + BANKING77](examples/groq_banking77/README.md)
 
 ## V1 proxy
 
@@ -134,6 +135,16 @@ python3 tools/build_dataset.py --task-id test_task --logs 'data/logs/*.jsonl'
 Le builder filtre les requetes `success` avec `training_eligible=true`,
 deduplique par `input_hash`, produit `train.parquet`, `validation.parquet`,
 `test.parquet` et un `manifest.json`.
+
+Pour un teacher OpenAI-compatible qui renvoie un JSON de chat completion, le
+label peut etre extrait de `choices[0].message.content` :
+
+```sh
+python3 tools/build_dataset.py \
+  --task-id test_task \
+  --logs 'data/logs/*.jsonl' \
+  --target-field openai_message_content
+```
 
 Un dataset peut ensuite etre augmente avec des exemples synthetiques locaux,
 sans appel a une plateforme tierce :

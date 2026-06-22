@@ -34,6 +34,12 @@ def main() -> int:
         default=1,
         help="Fail if fewer eligible examples are found. Default: 1",
     )
+    parser.add_argument(
+        "--target-field",
+        choices=("response_redacted", "openai_message_content"),
+        default="response_redacted",
+        help="Training target extracted from logs. Default: response_redacted",
+    )
     args = parser.parse_args()
 
     try:
@@ -52,6 +58,7 @@ def main() -> int:
     con = duckdb.connect(":memory:")
     logs_literal = sql_string_literal(args.logs)
     task_literal = sql_string_literal(args.task_id)
+    target_expr = target_sql_expression(args.target_field)
 
     try:
         con.execute(
@@ -76,8 +83,8 @@ def main() -> int:
                 routing_decision,
                 routing_reason,
                 prompt_redacted AS input,
-                response_redacted AS teacher_output,
-                response_redacted AS validated_output,
+                {target_expr} AS teacher_output,
+                {target_expr} AS validated_output,
                 input_hash,
                 input_tokens,
                 output_tokens,
@@ -104,6 +111,8 @@ def main() -> int:
               END AS split
             FROM ranked
             WHERE duplicate_rank = 1
+              AND teacher_output IS NOT NULL
+              AND length(CAST(teacher_output AS VARCHAR)) > 0
             """
         )
     except Exception as exc:
@@ -152,7 +161,7 @@ def main() -> int:
             """
         )
 
-    manifest = build_manifest(con, args.logs, args.task_id, dataset_id)
+    manifest = build_manifest(con, args.logs, args.task_id, dataset_id, args.target_field)
     manifest_path = dataset_dir / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
 
@@ -161,7 +170,9 @@ def main() -> int:
     return 0
 
 
-def build_manifest(con: Any, logs: str, task_id: str, dataset_id: str) -> dict[str, Any]:
+def build_manifest(
+    con: Any, logs: str, task_id: str, dataset_id: str, target_field: str
+) -> dict[str, Any]:
     counts = dict(
         con.execute(
             """
@@ -205,6 +216,7 @@ def build_manifest(con: Any, logs: str, task_id: str, dataset_id: str) -> dict[s
             "status": "success",
             "training_eligible": True,
             "required_fields": ["prompt_redacted", "response_redacted"],
+            "target_field": target_field,
             "dedupe_key": "coalesce(input_hash, request_id)",
             "split_strategy": "stable hash(request_id/input_hash): 70/15/15",
         },
@@ -219,6 +231,21 @@ def default_dataset_id(task_id: str) -> str:
 
 def sql_string_literal(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
+
+
+def target_sql_expression(target_field: str) -> str:
+    if target_field == "response_redacted":
+        return "response_redacted"
+    return """
+        CASE
+          WHEN json_valid(response_redacted) THEN coalesce(
+            json_extract_string(response_redacted, '$.choices[0].message.content'),
+            json_extract_string(response_redacted, '$.choices[0].text'),
+            response_redacted
+          )
+          ELSE response_redacted
+        END
+    """
 
 
 if __name__ == "__main__":
