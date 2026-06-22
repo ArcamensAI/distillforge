@@ -134,6 +134,20 @@ Le builder filtre les requetes `success` avec `training_eligible=true`,
 deduplique par `input_hash`, produit `train.parquet`, `validation.parquet`,
 `test.parquet` et un `manifest.json`.
 
+Un dataset peut ensuite etre augmente avec des exemples synthetiques locaux,
+sans appel a une plateforme tierce :
+
+```sh
+python3 tools/synthetic_data.py \
+  --dataset data/datasets/test_task/ds_example \
+  --multiplier 2 \
+  --max-synthetic-ratio 0.8
+```
+
+Le generateur V1 utilise des templates deterministes, ne modifie que le split
+`train`, copie les labels depuis `validated_output` et annote le manifest avec
+le ratio synthetique obtenu.
+
 ## Training offline minimal
 
 Un modele etudiant classique peut etre entraine depuis un dataset versionne :
