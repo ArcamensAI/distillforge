@@ -17,8 +17,8 @@ from pathlib import Path
 from typing import Any
 
 
-ACTIVE_MODES = {"shadow", "canary", "student_only"}
-STUDENT_MODES = {"canary", "student_only"}
+ACTIVE_MODES = {"shadow", "canary", "student_only", "bandit"}
+STUDENT_MODES = {"canary", "student_only", "bandit"}
 NEGATIVE_RATINGS = {"bad", "incorrect", "wrong", "negative", "thumbs_down", "0", "1"}
 
 

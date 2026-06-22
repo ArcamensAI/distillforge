@@ -41,6 +41,7 @@ Modes supportes par le dataplane :
 - `shadow`
 - `student_only`
 - `canary`
+- `bandit`
 
 Si un snapshot pointe vers un modele etudiant absent de `config/example.yaml`,
 DistillForge retombe vers le teacher et journalise
@@ -228,6 +229,17 @@ Un rapport de divergence peut etre produit avec :
 
 ```sh
 python3 tools/shadow_report.py --logs data/logs/shadow.jsonl
+```
+
+Le mode `bandit` sert le student par defaut tout en conservant un pourcentage
+deterministe de probes teacher pour surveiller la qualite :
+
+```sh
+python3 tools/promote_model.py \
+  --model-dir models/test_task/student_example \
+  --mode bandit \
+  --teacher-probe-percentage 2 \
+  --min-accuracy 0.95
 ```
 
 Rollback teacher pour une tache :

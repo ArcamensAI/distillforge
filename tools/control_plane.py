@@ -18,7 +18,7 @@ from urllib.parse import parse_qs, urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
 TOOLS = ROOT / "tools"
-SUPPORTED_PROMOTION_MODES = {"teacher_only", "shadow", "canary", "student_only"}
+SUPPORTED_PROMOTION_MODES = {"teacher_only", "shadow", "canary", "student_only", "bandit"}
 
 
 def main() -> int:
@@ -254,6 +254,8 @@ def promote_task(task_id: str, payload: dict[str, Any], query: dict[str, str]) -
         str(path_arg(query | payload, "registry", default_registry_path())),
         "--student-traffic-percentage",
         str(int_arg(payload, "student_traffic_percentage", 1)),
+        "--teacher-probe-percentage",
+        str(int_arg(payload, "teacher_probe_percentage", 2)),
         "--min-accuracy",
         str(float_arg(payload, "min_accuracy", 0.0)),
         "--min-macro-f1",

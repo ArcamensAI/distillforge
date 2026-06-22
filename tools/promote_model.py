@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 
-SUPPORTED_MODES = {"teacher_only", "shadow", "canary", "student_only"}
+SUPPORTED_MODES = {"teacher_only", "shadow", "canary", "student_only", "bandit"}
 
 
 def main() -> int:
@@ -37,6 +37,12 @@ def main() -> int:
         default=1,
         help="Canary percentage. Default: 1",
     )
+    parser.add_argument(
+        "--teacher-probe-percentage",
+        type=int,
+        default=2,
+        help="Bandit teacher probe percentage. Default: 2",
+    )
     parser.add_argument("--min-accuracy", type=float, default=0.0)
     parser.add_argument("--min-macro-f1", type=float, default=0.0)
     args = parser.parse_args()
@@ -54,6 +60,9 @@ def main() -> int:
     if args.mode == "canary" and not 0 <= args.student_traffic_percentage <= 100:
         print("--student-traffic-percentage must be between 0 and 100", file=sys.stderr)
         return 2
+    if args.mode == "bandit" and not 0 <= args.teacher_probe_percentage <= 100:
+        print("--teacher-probe-percentage must be between 0 and 100", file=sys.stderr)
+        return 2
 
     if model_manifest is not None:
         validation_error = validate_model(model_manifest, args.min_accuracy, args.min_macro_f1)
@@ -63,7 +72,14 @@ def main() -> int:
 
     snapshot_path = Path(args.snapshot)
     snapshot = load_snapshot(snapshot_path)
-    new_snapshot = update_snapshot(snapshot, task_id, args.mode, model_manifest, args.student_traffic_percentage)
+    new_snapshot = update_snapshot(
+        snapshot,
+        task_id,
+        args.mode,
+        model_manifest,
+        args.student_traffic_percentage,
+        args.teacher_probe_percentage,
+    )
     write_json_atomic(snapshot_path, new_snapshot)
 
     event = {
@@ -130,6 +146,7 @@ def update_snapshot(
     mode: str,
     model_manifest: dict[str, Any] | None,
     canary_percentage: int,
+    teacher_probe_percentage: int,
 ) -> dict[str, Any]:
     updated = dict(snapshot)
     updated["version"] = int(updated.get("version", 0)) + 1
@@ -142,6 +159,8 @@ def update_snapshot(
         route["student_model"] = model_manifest["model_id"]
         if mode == "canary":
             route["student_traffic_percentage"] = canary_percentage
+        if mode == "bandit":
+            route["teacher_probe_percentage"] = teacher_probe_percentage
 
     tasks[task_id] = route
     updated["tasks"] = tasks

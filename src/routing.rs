@@ -64,6 +64,8 @@ pub struct TaskRoute {
     pub student_model: Option<String>,
     #[serde(default)]
     pub student_traffic_percentage: Option<u8>,
+    #[serde(default)]
+    pub teacher_probe_percentage: Option<u8>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Eq, PartialEq)]
@@ -73,6 +75,7 @@ pub enum RoutingMode {
     StudentOnly,
     Shadow,
     Canary,
+    Bandit,
 }
 
 impl Default for RoutingMode {
@@ -163,13 +166,29 @@ pub fn decide_route(
                 .and_then(|route| route.student_traffic_percentage)
                 .unwrap_or(0)
                 .min(100);
-            if percentage > 0 && canary_hit(&metadata.request_id, percentage) {
+            if percentage > 0 && percentage_hit(&metadata.request_id, percentage) {
                 choose_student(task_id, task_route, "canary_student")
             } else {
                 RoutingDecision::Teacher {
                     reason: "canary_teacher".to_string(),
                     task_id,
                 }
+            }
+        }
+        RoutingMode::Bandit => {
+            let teacher_probe_percentage = task_route
+                .and_then(|route| route.teacher_probe_percentage)
+                .unwrap_or(2)
+                .min(100);
+            if teacher_probe_percentage > 0
+                && percentage_hit(&metadata.request_id, teacher_probe_percentage)
+            {
+                RoutingDecision::Teacher {
+                    reason: "bandit_teacher_probe".to_string(),
+                    task_id,
+                }
+            } else {
+                choose_student(task_id, task_route, "bandit_student")
             }
         }
     }
@@ -238,7 +257,7 @@ fn choose_student(
     }
 }
 
-fn canary_hit(request_id: &str, percentage: u8) -> bool {
+fn percentage_hit(request_id: &str, percentage: u8) -> bool {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     request_id.hash(&mut hasher);
     (hasher.finish() % 100) < u64::from(percentage)
@@ -334,6 +353,7 @@ mod tests {
                 mode: RoutingMode::StudentOnly,
                 student_model: Some("local_student".to_string()),
                 student_traffic_percentage: None,
+                teacher_probe_percentage: None,
             },
         );
         let snapshot = RoutingSnapshot {
@@ -395,6 +415,7 @@ mod tests {
                 mode: RoutingMode::Shadow,
                 student_model: Some("local_student".to_string()),
                 student_traffic_percentage: None,
+                teacher_probe_percentage: None,
             },
         );
         let snapshot = RoutingSnapshot {
@@ -418,6 +439,79 @@ mod tests {
                 reason: "shadow_teacher".to_string(),
                 task_id: "email_classification_v1".to_string(),
                 model_id: "local_student".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn routes_bandit_to_student_by_default() {
+        let mut tasks = BTreeMap::new();
+        tasks.insert(
+            "email_classification_v1".to_string(),
+            TaskRoute {
+                mode: RoutingMode::Bandit,
+                student_model: Some("local_student".to_string()),
+                student_traffic_percentage: None,
+                teacher_probe_percentage: Some(0),
+            },
+        );
+        let snapshot = RoutingSnapshot {
+            version: 1,
+            default_mode: RoutingMode::TeacherOnly,
+            tasks,
+        };
+        let metadata = RequestMetadata {
+            request_id: "req_1".to_string(),
+            client_id: Some("crm_backend".to_string()),
+            task_id: Some("email_classification_v1".to_string()),
+            cost_center: None,
+            quality_mode: None,
+            pii_level: None,
+            no_train: false,
+        };
+
+        assert_eq!(
+            decide_route(&metadata, MissingTaskBehavior::TeacherFallback, &snapshot),
+            RoutingDecision::Student {
+                reason: "bandit_student".to_string(),
+                task_id: "email_classification_v1".to_string(),
+                model_id: "local_student".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn routes_bandit_teacher_probe() {
+        let mut tasks = BTreeMap::new();
+        tasks.insert(
+            "email_classification_v1".to_string(),
+            TaskRoute {
+                mode: RoutingMode::Bandit,
+                student_model: Some("local_student".to_string()),
+                student_traffic_percentage: None,
+                teacher_probe_percentage: Some(100),
+            },
+        );
+        let snapshot = RoutingSnapshot {
+            version: 1,
+            default_mode: RoutingMode::TeacherOnly,
+            tasks,
+        };
+        let metadata = RequestMetadata {
+            request_id: "req_1".to_string(),
+            client_id: Some("crm_backend".to_string()),
+            task_id: Some("email_classification_v1".to_string()),
+            cost_center: None,
+            quality_mode: None,
+            pii_level: None,
+            no_train: false,
+        };
+
+        assert_eq!(
+            decide_route(&metadata, MissingTaskBehavior::TeacherFallback, &snapshot),
+            RoutingDecision::Teacher {
+                reason: "bandit_teacher_probe".to_string(),
+                task_id: "email_classification_v1".to_string()
             }
         );
     }
