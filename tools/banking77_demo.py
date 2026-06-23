@@ -132,6 +132,7 @@ def run_proxy_requests(args: argparse.Namespace) -> int:
         for index, row in enumerate(requests, start=1):
             result = call_proxy(args.proxy_url, row)
             handle.write(json.dumps(result, sort_keys=True) + "\n")
+            handle.flush()
             if result["http_status"] < 400:
                 success += 1
             if args.sleep_ms > 0 and index < len(requests):

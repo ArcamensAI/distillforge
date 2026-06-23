@@ -169,7 +169,7 @@ def classify_with_groq(
     payload = {
         "model": model,
         "temperature": 0,
-        "max_completion_tokens": 64,
+        "max_completion_tokens": 512,
         "reasoning_format": "hidden",
         "reasoning_effort": "low",
         "messages": [
@@ -211,12 +211,20 @@ def classify_with_groq(
 
 def normalize_label(value: str, intents: list[str]) -> str:
     stripped = value.strip().strip("`'\" ")
+    aliases = {
+        "get_virtual_card": "getting_virtual_card",
+        "top_up_by_card": "topping_up_by_card",
+    }
     intent_set = set(intents)
+    if stripped in aliases and aliases[stripped] in intent_set:
+        return aliases[stripped]
     if stripped in intent_set:
         return stripped
 
     candidates = re.findall(r"[a-zA-Z][a-zA-Z0-9_?]+", stripped)
     for candidate in candidates:
+        if candidate in aliases and aliases[candidate] in intent_set:
+            return aliases[candidate]
         if candidate in intent_set:
             return candidate
     raise ValueError(f"Groq returned an unknown intent: {value!r}")

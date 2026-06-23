@@ -79,7 +79,7 @@ set +a
 ```
 
 Note pour GPT-OSS : l'adaptateur utilise `reasoning_format: hidden`,
-`reasoning_effort: low` et `max_completion_tokens: 64`. Sans cela, le modele
+`reasoning_effort: low` et `max_completion_tokens: 512`. Sans cela, le modele
 peut consommer les premiers tokens en raisonnement et renvoyer un `content`
 vide.
 
