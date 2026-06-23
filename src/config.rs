@@ -262,4 +262,21 @@ mod tests {
             Some(300)
         );
     }
+
+    #[test]
+    fn parses_groq_banking77_volume_config() {
+        let config = load_config("examples/groq_banking77/config.volume.yaml")
+            .expect("volume demo config should parse");
+
+        assert_eq!(config.teacher.address, "127.0.0.1:9200");
+        assert_eq!(
+            config.logging.path,
+            "examples/groq_banking77/data_volume/logs/proxy.jsonl"
+        );
+        assert_eq!(
+            config.routing.snapshot_path,
+            "examples/groq_banking77/routing_snapshot.volume.json"
+        );
+        assert_eq!(config.rate_limits.default_requests_per_window, Some(20));
+    }
 }

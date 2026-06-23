@@ -55,6 +55,12 @@ def main() -> int:
     )
     budget.add_argument("--limit", type=int, default=100)
     budget.add_argument("--intents", default=str(DEFAULT_ROOT / "intents.json"))
+    budget.add_argument(
+        "--token-budget",
+        type=int,
+        default=200_000,
+        help="Token budget used to estimate max request count. Default: 200000",
+    )
 
     args = parser.parse_args()
     if args.command == "prepare":
@@ -165,12 +171,23 @@ def estimate_budget(args: argparse.Namespace) -> int:
     prompt_chars = sum(len(row["text"]) for row in requests)
     intent_chars = len("\n".join(f"- {intent}" for intent in intents)) * len(requests)
     estimated_tokens = (prompt_chars + intent_chars) // 4
+    estimated_tokens_per_request = estimated_tokens / len(requests) if requests else 0
+    estimated_requests_for_budget = (
+        int(args.token_budget / estimated_tokens_per_request)
+        if estimated_tokens_per_request > 0
+        else 0
+    )
     print(
         json.dumps(
             {
                 "requests": len(requests),
                 "intents": len(intents),
                 "estimated_prompt_tokens": estimated_tokens,
+                "estimated_prompt_tokens_per_request": round(
+                    estimated_tokens_per_request, 2
+                ),
+                "token_budget": args.token_budget,
+                "estimated_requests_for_budget": estimated_requests_for_budget,
                 "note": "rough chars/4 estimate; Groq account limits remain authoritative",
             },
             indent=2,

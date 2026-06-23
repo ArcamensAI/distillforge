@@ -1,0 +1,48 @@
+server:
+  listen_addr: "127.0.0.1:6188"
+  metrics_addr: "127.0.0.1:6192"
+
+teacher:
+  name: "groq_openai_gpt_oss_20b"
+  address: "127.0.0.1:9200"
+  use_tls: false
+  sni: ""
+  host_header: "127.0.0.1:9200"
+  input_cost_per_million_tokens_usd: 0.0
+  output_cost_per_million_tokens_usd: 0.0
+
+students:
+  - name: "banking_intent_student_volume"
+    address: "127.0.0.1:9100"
+    use_tls: false
+    sni: ""
+    host_header: "127.0.0.1:9100"
+    input_cost_per_million_tokens_usd: 0.0
+    output_cost_per_million_tokens_usd: 0.0
+
+timeouts:
+  upstream_connection_timeout_ms: 2000
+  teacher_inference_timeout_ms: 45000
+  student_inference_timeout_ms: 2000
+  upstream_write_timeout_ms: 45000
+  shadow_student_timeout_ms: 5000
+
+logging:
+  path: "examples/groq_banking77/data_volume/logs/proxy.jsonl"
+  feedback_path: "examples/groq_banking77/data_volume/logs/feedback.jsonl"
+  shadow_path: "examples/groq_banking77/data_volume/logs/shadow.jsonl"
+  mode: "redacted"
+  max_capture_bytes: 65536
+
+routing:
+  default_missing_task_behavior: "teacher_fallback"
+  snapshot_path: "examples/groq_banking77/routing_snapshot.volume.json"
+
+rate_limits:
+  enabled: true
+  window_ms: 60000
+  default_requests_per_window: 20
+  clients:
+    banking_demo: 20
+  tasks:
+    banking_intent_v1: 20
