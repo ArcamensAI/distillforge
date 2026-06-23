@@ -44,7 +44,10 @@ Fichiers principaux :
 - `routing_snapshot.json` : routage smoke.
 - `config.volume.yaml` : scenario volume controle.
 - `routing_snapshot.volume.json` : routage volume.
+- `config.local_10k.yaml` : scenario local 10k sans provider externe.
+- `routing_snapshot.local_10k.json` : routage local 10k.
 - `tools/groq_teacher.py` : adaptateur Groq local.
+- `tools/local_banking_teacher.py` : teacher local par embeddings.
 - `tools/banking77_demo.py` : preparation, budget, appels proxy, evaluation.
 
 Les donnees generees sont ignorees par Git :
@@ -402,3 +405,92 @@ Ne supprimez pas `.env` si vous voulez conserver la cle Groq locale.
   `status=success` et que `--target-field openai_message_content` est utilise.
 - Student faible : augmenter la volumetrie reelle avant d'utiliser les donnees
   synthetiques.
+
+## Scenario 3 : teacher local 10k
+
+Objectif : traiter `10 000` appels sans provider externe, en utilisant un
+teacher local par embeddings. Ce scenario est beaucoup moins couteux que Groq,
+mais ce n'est pas un LLM : il classe par similarite avec les exemples
+BANKING77 de reference.
+
+Preparer les donnees 10k :
+
+```sh
+python3 tools/banking77_demo.py prepare \
+  --out examples/groq_banking77/data_10k \
+  --train-limit 10000 \
+  --eval-limit 3000
+```
+
+Lancer le teacher local :
+
+```sh
+python3 tools/local_banking_teacher.py \
+  --host 127.0.0.1 \
+  --port 9300 \
+  --reference-requests examples/groq_banking77/data_10k/requests/train_requests.jsonl \
+  --nearest-neighbors 5
+```
+
+Lancer DistillForge :
+
+```sh
+DISTILLFORGE_CONFIG=examples/groq_banking77/config.local_10k.yaml \
+  cargo run --bin distillforge
+```
+
+Cette config desactive le rate limit DistillForge, car le teacher est local et
+ne consomme aucun quota provider.
+
+Envoyer les 10k appels locaux :
+
+```sh
+python3 tools/banking77_demo.py run-proxy \
+  --requests examples/groq_banking77/data_10k/requests/train_requests.jsonl \
+  --proxy-url http://127.0.0.1:6188 \
+  --out examples/groq_banking77/data_local_10k/teacher_calls.jsonl \
+  --limit 10000 \
+  --sleep-ms 0
+```
+
+Evaluer le teacher local :
+
+```sh
+python3 tools/banking77_demo.py evaluate-calls \
+  --calls examples/groq_banking77/data_local_10k/teacher_calls.jsonl
+```
+
+Construire le dataset local 10k :
+
+```sh
+python3 tools/build_dataset.py \
+  --task-id banking_intent_v1 \
+  --logs examples/groq_banking77/data_local_10k/logs/proxy.jsonl \
+  --out examples/groq_banking77/data_local_10k/datasets \
+  --dataset-id ds_banking77_local_10k \
+  --target-field openai_message_content \
+  --min-samples 9000
+```
+
+Entrainer le student local 10k :
+
+```sh
+python3 tools/train_student.py \
+  --dataset examples/groq_banking77/data_local_10k/datasets/banking_intent_v1/ds_banking77_local_10k \
+  --out examples/groq_banking77/models \
+  --model-id banking_intent_student_local_10k \
+  --min-train-samples 7000
+```
+
+Resultat observe sur M1 32 Go :
+
+- teacher local : `10 000` appels consolides, `0` invalide, accuracy `0.9412`
+  versus labels BANKING77 ;
+- dataset DistillForge : `9 996` samples apres deduplication ;
+- split : `7 005` train, `1 560` validation, `1 431` test ;
+- student local 10k : accuracy `0.8192`, macro F1 `0.8231` ;
+- latence teacher locale observee dans les logs : p95 autour de `16 ms`.
+
+Si un premier run produit des `429`, verifier que `config.local_10k.yaml`
+contient bien `rate_limits.enabled: false`, redemarrer le proxy, puis rejouer
+uniquement les requetes refusees.

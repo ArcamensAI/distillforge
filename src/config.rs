@@ -279,4 +279,23 @@ mod tests {
         );
         assert_eq!(config.rate_limits.default_requests_per_window, Some(20));
     }
+
+    #[test]
+    fn parses_groq_banking77_local_10k_config() {
+        let config = load_config("examples/groq_banking77/config.local_10k.yaml")
+            .expect("local 10k demo config should parse");
+
+        assert_eq!(config.teacher.name, "local_embedding_banking_teacher");
+        assert_eq!(config.teacher.address, "127.0.0.1:9300");
+        assert_eq!(
+            config.logging.path,
+            "examples/groq_banking77/data_local_10k/logs/proxy.jsonl"
+        );
+        assert_eq!(
+            config.routing.snapshot_path,
+            "examples/groq_banking77/routing_snapshot.local_10k.json"
+        );
+        assert!(!config.rate_limits.enabled);
+        assert_eq!(config.rate_limits.default_requests_per_window, Some(1200));
+    }
 }
