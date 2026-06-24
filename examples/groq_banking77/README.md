@@ -46,8 +46,11 @@ Fichiers principaux :
 - `routing_snapshot.volume.json` : routage volume.
 - `config.local_10k.yaml` : scenario local 10k sans provider externe.
 - `routing_snapshot.local_10k.json` : routage local 10k.
+- `config.local_llm.yaml` : scenario maitre LLM 8B et student LLM 1.5B.
+- `routing_snapshot.local_llm.json` : routage du scenario LLM.
 - `tools/groq_teacher.py` : adaptateur Groq local.
 - `tools/local_banking_teacher.py` : teacher local par embeddings.
+- `tools/local_llm_banking_teacher.py` : adaptateur MLX LLM local.
 - `tools/banking77_demo.py` : preparation, budget, appels proxy, evaluation.
 
 Les donnees generees sont ignorees par Git :
@@ -494,3 +497,105 @@ Resultat observe sur M1 32 Go :
 Si un premier run produit des `429`, verifier que `config.local_10k.yaml`
 contient bien `rate_limits.enabled: false`, redemarrer le proxy, puis rejouer
 uniquement les requetes refusees.
+
+## Scenario 4 : maitre LLM 8B et student LLM
+
+Objectif : tester DistillForge avec un maitre LLM local d'au moins 7 milliards
+de parametres et un student LLM plus petit.
+
+Modeles testes sur M1 32 Go :
+
+- maitre : `mlx-community/Qwen3-8B-4bit` ;
+- student : `mlx-community/Qwen2.5-1.5B-Instruct-4bit`.
+
+Preparer un petit echantillon :
+
+```sh
+python3 tools/banking77_demo.py prepare \
+  --out examples/groq_banking77/data_llm \
+  --train-limit 40 \
+  --eval-limit 20
+```
+
+Lancer le maitre LLM :
+
+```sh
+python3 tools/local_llm_banking_teacher.py \
+  --host 127.0.0.1 \
+  --port 9400 \
+  --model mlx-community/Qwen3-8B-4bit \
+  --model-id qwen3_8b_master \
+  --intents examples/groq_banking77/data_llm/intents.json \
+  --max-tokens 128
+```
+
+Lancer le student LLM :
+
+```sh
+python3 tools/local_llm_banking_teacher.py \
+  --host 127.0.0.1 \
+  --port 9500 \
+  --model mlx-community/Qwen2.5-1.5B-Instruct-4bit \
+  --model-id qwen2_5_1_5b_student \
+  --intents examples/groq_banking77/data_llm/intents.json \
+  --max-tokens 64
+```
+
+Lancer DistillForge en teacher-only pour mesurer le maitre :
+
+```sh
+DISTILLFORGE_CONFIG=examples/groq_banking77/config.local_llm.yaml \
+  cargo run --bin distillforge
+```
+
+Envoyer un smoke test au maitre :
+
+```sh
+python3 tools/banking77_demo.py run-proxy \
+  --requests examples/groq_banking77/data_llm/requests/train_requests.jsonl \
+  --proxy-url http://127.0.0.1:6188 \
+  --out examples/groq_banking77/data_local_llm/master_calls.jsonl \
+  --limit 10 \
+  --sleep-ms 0
+```
+
+Evaluer le maitre sur l'echantillon de test :
+
+```sh
+python3 tools/banking77_demo.py run-proxy \
+  --requests examples/groq_banking77/data_llm/requests/eval_requests.jsonl \
+  --proxy-url http://127.0.0.1:6188 \
+  --out examples/groq_banking77/data_local_llm/master_eval_calls_20.jsonl \
+  --limit 20 \
+  --sleep-ms 0
+
+python3 tools/banking77_demo.py evaluate-calls \
+  --calls examples/groq_banking77/data_local_llm/master_eval_calls_20.jsonl
+```
+
+Pour evaluer le student LLM, appeler son endpoint directement ou passer le
+snapshot en `student_only` avec `student_model=qwen2_5_1_5b_student`.
+
+```sh
+python3 tools/banking77_demo.py run-proxy \
+  --requests examples/groq_banking77/data_llm/requests/eval_requests.jsonl \
+  --proxy-url http://127.0.0.1:9500 \
+  --out examples/groq_banking77/data_local_llm/student_eval_calls_20.jsonl \
+  --limit 20 \
+  --sleep-ms 0
+
+python3 tools/banking77_demo.py evaluate-calls \
+  --calls examples/groq_banking77/data_local_llm/student_eval_calls_20.jsonl
+```
+
+Resultats observes sur M1 32 Go avec l'echantillon `eval-limit 20` :
+
+- maitre `Qwen3-8B-4bit` via DistillForge : 20/20 appels HTTP reussis,
+  accuracy 0.55, 0 label invalide ;
+- student `Qwen2.5-1.5B-Instruct-4bit` direct : 18/20 appels HTTP reussis,
+  accuracy 0.40, 2 labels invalides.
+
+Ce scenario valide l'integration LLM/LLM locale et donne un point de comparaison
+maitre/student. Il ne fine-tune pas encore le student ; les performances brutes
+confirment qu'il faut ensuite ajouter une etape de distillation/fine-tuning ou un
+meilleur prompt de classification.

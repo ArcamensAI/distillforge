@@ -1,0 +1,9 @@
+{
+  "default_mode": "teacher_only",
+  "tasks": {
+    "banking_intent_v1": {
+      "mode": "teacher_only"
+    }
+  },
+  "version": 1
+}

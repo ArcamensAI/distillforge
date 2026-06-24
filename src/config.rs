@@ -298,4 +298,20 @@ mod tests {
         assert!(!config.rate_limits.enabled);
         assert_eq!(config.rate_limits.default_requests_per_window, Some(1200));
     }
+
+    #[test]
+    fn parses_groq_banking77_local_llm_config() {
+        let config = load_config("examples/groq_banking77/config.local_llm.yaml")
+            .expect("local LLM demo config should parse");
+
+        assert_eq!(config.teacher.name, "qwen3_8b_master");
+        assert_eq!(config.teacher.address, "127.0.0.1:9400");
+        assert_eq!(config.students[0].name, "qwen2_5_1_5b_student");
+        assert_eq!(config.students[0].address, "127.0.0.1:9500");
+        assert_eq!(
+            config.routing.snapshot_path,
+            "examples/groq_banking77/routing_snapshot.local_llm.json"
+        );
+        assert!(!config.rate_limits.enabled);
+    }
 }
