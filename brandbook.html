@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>distillForge - Brandbook</title>
+    <style>
+        @page {
+            size: A4 landscape;
+            margin: 15mm 20mm;
+            background-color: #0b1320;
+        }
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            color: #e2e8f0;
+            background-color: #0b1320;
+            font-size: 11pt;
+            line-height: 1.6;
+        }
+        *, *::before, *::after {
+            box-sizing: border-box;
+        }
+        h1, h2, h3 {
+            color: #ffffff;
+            margin-top: 0;
+            font-weight: 700;
+        }
+        h1 {
+            font-size: 32pt;
+            color: #00e676;
+            margin-bottom: 5px;
+            letter-spacing: -1px;
+        }
+        h2 {
+            font-size: 18pt;
+            margin-bottom: 15px;
+            border-bottom: 1px solid #1e293b;
+            padding-bottom: 5px;
+        }
+        h3 {
+            font-size: 14pt;
+            color: #94a3b8;
+        }
+        .subtitle {
+            font-size: 14pt;
+            color: #94a3b8;
+            margin-bottom: 30px;
+        }
+        .section {
+            background-color: #111c2e;
+            padding: 25px;
+            margin-bottom: 25px;
+            border-left: 4px solid #00e676;
+            border-radius: 0 8px 8px 0;
+            page-break-inside: avoid;
+        }
+        .layout-table {
+            display: table;
+            width: 100%;
+            table-layout: fixed;
+            border-collapse: separate;
+            border-spacing: 20px 0;
+            margin-left: -10px;
+        }
+        .layout-row {
+            display: table-row;
+        }
+        .layout-col {
+            display: table-cell;
+            vertical-align: top;
+        }
+        .logo-box {
+            background-color: #ffffff;
+            padding: 30px;
+            border-radius: 8px;
+            text-align: center;
+            margin-bottom: 15px;
+        }
+        .logo-box.dark {
+            background-color: #050a11;
+            border: 1px solid #1e293b;
+        }
+        .color-swatch-container {
+            display: table;
+            width: 100%;
+            border-spacing: 15px 0;
+            margin-left: -7px;
+        }
+        .color-swatch {
+            display: table-cell;
+            text-align: left;
+            width: 25%;
+        }
+        .color-box {
+            height: 60px;
+            border-radius: 6px;
+            margin-bottom: 10px;
+            border: 1px solid #334155;
+        }
+        .color-name {
+            font-weight: bold;
+            font-size: 12pt;
+            color: #ffffff;
+            margin-bottom: 2px;
+        }
+        .color-hex {
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 10pt;
+            color: #94a3b8;
+        }
+        .typo-sample {
+            background-color: #1e293b;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+        }
+        .typo-large {
+            font-size: 24pt;
+            font-weight: 700;
+            color: #ffffff;
+            margin-bottom: 5px;
+        }
+        .typo-regular {
+            font-size: 12pt;
+            font-weight: 400;
+            color: #cbd5e1;
+        }
+        .ui-mockup {
+            background-color: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            padding: 20px;
+            margin-top: 10px;
+        }
+        .metric-card {
+            background-color: #1e293b;
+            padding: 15px;
+            border-radius: 6px;
+            border-left: 4px solid #00e676;
+            display: inline-block;
+            width: 200px;
+        }
+        .metric-title {
+            font-size: 10pt;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .metric-value {
+            font-size: 20pt;
+            font-weight: bold;
+            color: #00e676;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>distillForge</h1>
+    <div class="subtitle">Brand Guidelines & Identity System</div>
+
+    <div class="layout-table">
+        <div class="layout-row">
+            <div class="layout-col" style="width: 50%;">
+                <div class="section">
+                    <h2>Product Essence</h2>
+                    <p><strong>distillForge</strong> is a smart proxy that routes LLM requests to the most cost-effective models without sacrificing quality. It automates model distillation, training, and deployment. Our brand focuses on <strong>cost reduction, efficiency, and seamless integration</strong>.</p>
+                </div>
+            </div>
+            <div class="layout-col" style="width: 50%;">
+                <div class="section">
+                    <h2>Visual Metaphor</h2>
+                    <p>The design merges <strong>'distill'</strong> (refining, filtering, optimizing flow) and <strong>'forge'</strong> (structure, creation, technological strength). The logomark acts as a geometric press—taking large inputs and forging them into precise, highly efficient outputs.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>Primary Logo & Logomark</h2>
+        <div class="layout-table">
+            <div class="layout-row">
+                <div class="layout-col">
+                    <div class="logo-box">
+                        <div style="color:#64748b; font-size:9pt; text-align:left; margin-bottom:10px;">Light Mode</div>
+                        <!-- Light Mode Logo SVG -->
+                        <svg viewBox="0 0 350 80" width="280" xmlns="http://www.w3.org/2000/svg">
+                            <g transform="translate(0, 5)">
+                                <!-- Forge/Distill Geometric Icon -->
+                                <path d="M10,15 L35,15 L45,40 L35,65 L10,65 L20,40 Z" fill="#00e676"/>
+                                <path d="M80,15 L55,15 L45,40 L55,65 L80,65 L70,40 Z" fill="#003f4a"/>
+                            </g>
+                            <text x="95" y="55" font-family="'Segoe UI', Helvetica, sans-serif" font-size="42" font-weight="300" fill="#1e293b">distill<tspan font-weight="800" fill="#003f4a">Forge</tspan></text>
+                        </svg>
+                    </div>
+                </div>
+                <div class="layout-col">
+                    <div class="logo-box dark">
+                        <div style="color:#64748b; font-size:9pt; text-align:left; margin-bottom:10px;">Dark Mode (Primary)</div>
+                        <!-- Dark Mode Logo SVG -->
+                        <svg viewBox="0 0 350 80" width="280" xmlns="http://www.w3.org/2000/svg">
+                            <g transform="translate(0, 5)">
+                                <path d="M10,15 L35,15 L45,40 L35,65 L10,65 L20,40 Z" fill="#00e676"/>
+                                <path d="M80,15 L55,15 L45,40 L55,65 L80,65 L70,40 Z" fill="#00a8c6"/>
+                            </g>
+                            <text x="95" y="55" font-family="'Segoe UI', Helvetica, sans-serif" font-size="42" font-weight="300" fill="#ffffff">distill<tspan font-weight="800" fill="#00e676">Forge</tspan></text>
+                        </svg>
+                    </div>
+                </div>
+                <div class="layout-col" style="width: 25%;">
+                    <div class="logo-box dark">
+                        <div style="color:#64748b; font-size:9pt; text-align:left; margin-bottom:10px;">Icon Only</div>
+                        <!-- Logomark Only SVG -->
+                        <svg viewBox="0 0 90 80" width="60" xmlns="http://www.w3.org/2000/svg">
+                            <g transform="translate(0, 5)">
+                                <path d="M10,15 L35,15 L45,40 L35,65 L10,65 L20,40 Z" fill="#00e676"/>
+                                <path d="M80,15 L55,15 L45,40 L55,65 L80,65 L70,40 Z" fill="#00a8c6"/>
+                            </g>
+                        </svg>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="layout-table">
+        <div class="layout-row">
+            <div class="layout-col" style="width: 60%;">
+                <div class="section">
+                    <h2>Color Palette</h2>
+                    <div class="color-swatch-container">
+                        <div class="color-swatch">
+                            <div class="color-box" style="background-color: #00e676;"></div>
+                            <div class="color-name">FinOps Green</div>
+                            <div class="color-hex">#00E676</div>
+                            <div class="color-hex" style="font-size:8pt; margin-top:4px;">Primary Accent (Value/Efficiency)</div>
+                        </div>
+                        <div class="color-swatch">
+                            <div class="color-box" style="background-color: #003f4a;"></div>
+                            <div class="color-name">Deep Tech Teal</div>
+                            <div class="color-hex">#003F4A</div>
+                            <div class="color-hex" style="font-size:8pt; margin-top:4px;">Trust & Technology</div>
+                        </div>
+                        <div class="color-swatch">
+                            <div class="color-box" style="background-color: #0b1320;"></div>
+                            <div class="color-name">Proxy Midnight</div>
+                            <div class="color-hex">#0B1320</div>
+                            <div class="color-hex" style="font-size:8pt; margin-top:4px;">Background / Structure</div>
+                        </div>
+                        <div class="color-swatch">
+                            <div class="color-box" style="background-color: #f1f5f9;"></div>
+                            <div class="color-name">Cloud White</div>
+                            <div class="color-hex">#F1F5F9</div>
+                            <div class="color-hex" style="font-size:8pt; margin-top:4px;">Light Mode Background</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="layout-col" style="width: 40%;">
+                <div class="section">
+                    <h2>Typography</h2>
+                    <div class="typo-sample">
+                        <div class="color-hex" style="margin-bottom: 5px;">Primary: Segoe UI / Helvetica</div>
+                        <div class="typo-large">Aa Bb Cc Dd</div>
+                        <div class="typo-regular">Used for Logos, Headings, and primary structural elements. Expresses precision and modernity.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="section" style="page-break-inside: avoid;">
+        <h2>Brand Application: Dashboard Mockup</h2>
+        <p style="color: #94a3b8; margin-bottom: 15px;">Visualizing the brand inside the distillForge web application interface.</p>
+        <div class="ui-mockup">
+            <div class="layout-table" style="border-spacing: 0; border-bottom: 1px solid #1e293b; padding-bottom: 15px; margin-bottom: 15px; width: 100%;">
+                <div class="layout-row">
+                    <div class="layout-col" style="width: 150px; vertical-align: middle;">
+                        <svg viewBox="0 0 350 80" width="120" xmlns="http://www.w3.org/2000/svg">
+                            <g transform="translate(0, 5)">
+                                <path d="M10,15 L35,15 L45,40 L35,65 L10,65 L20,40 Z" fill="#00e676"/>
+                                <path d="M80,15 L55,15 L45,40 L55,65 L80,65 L70,40 Z" fill="#00a8c6"/>
+                            </g>
+                            <text x="95" y="55" font-family="'Segoe UI', Helvetica, sans-serif" font-size="42" font-weight="300" fill="#ffffff">distill<tspan font-weight="800" fill="#00e676">Forge</tspan></text>
+                        </svg>
+                    </div>
+                    <div class="layout-col" style="vertical-align: middle; text-align: right; color: #94a3b8; font-size: 10pt;">
+                        Overview &nbsp;&nbsp;&nbsp; Models &nbsp;&nbsp;&nbsp; Cost Center &nbsp;&nbsp;&nbsp; <span style="color: #00e676;">Documentation</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="layout-table" style="border-spacing: 15px 0; margin-left: -15px;">
+                <div class="layout-row">
+                    <div class="layout-col">
+                        <div class="metric-card">
+                            <div class="metric-title">Total Cost Avoided</div>
+                            <div class="metric-value">$14,250.00</div>
+                        </div>
+                    </div>
+                    <div class="layout-col">
+                        <div class="metric-card" style="border-left-color: #00a8c6;">
+                            <div class="metric-title">Active Models Proxied</div>
+                            <div class="metric-value" style="color: #00a8c6;">12</div>
+                        </div>
+                    </div>
+                    <div class="layout-col">
+                        <div class="metric-card" style="border-left-color: #64748b;">
+                            <div class="metric-title">Avg. Latency Reduction</div>
+                            <div class="metric-value" style="color: #ffffff;">- 34%</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>
+

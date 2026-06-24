@@ -1,5 +1,7 @@
 # DistillForge
 
+*Lire dans une autre langue : [English](README.en.md)*
+
 Proxy FinOps pour LLM.
 
 ## Documentation
