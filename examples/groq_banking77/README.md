@@ -475,7 +475,7 @@ python3 tools/build_dataset.py \
   --min-samples 9000
 ```
 
-Entrainer le student local 10k :
+Entrainer le student local 10k baseline :
 
 ```sh
 python3 tools/train_student.py \
@@ -485,13 +485,42 @@ python3 tools/train_student.py \
   --min-train-samples 7000
 ```
 
+Entrainer le student recommande, hybride embeddings + TF-IDF :
+
+```sh
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+python3 tools/train_student.py \
+  --dataset examples/groq_banking77/data_local_10k/datasets/banking_intent_v1/ds_banking77_local_10k \
+  --out examples/groq_banking77/models \
+  --model-id banking_intent_student_hybrid_bge_m3_10k \
+  --min-train-samples 7000 \
+  --student-kind hybrid_embedding_tfidf \
+  --embedding-model BAAI/bge-m3 \
+  --input-format openai_user_content \
+  --batch-size 64
+```
+
+Servir le student hybride :
+
+```sh
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+python3 tools/student_inference.py \
+  --model-dir examples/groq_banking77/models/banking_intent_v1/banking_intent_student_hybrid_bge_m3_10k \
+  --listen 127.0.0.1:9101
+```
+
 Resultat observe sur M1 32 Go :
 
 - teacher local : `10 000` appels consolides, `0` invalide, accuracy `0.9412`
   versus labels BANKING77 ;
 - dataset DistillForge : `9 996` samples apres deduplication ;
 - split : `7 005` train, `1 560` validation, `1 431` test ;
-- student local 10k : accuracy `0.8192`, macro F1 `0.8231` ;
+- student TF-IDF local 10k : accuracy `0.8192`, macro F1 `0.8231` ;
+- student embeddings MiniLM local 10k : accuracy `0.8853`, macro F1 `0.8852` ;
+- student embeddings `BAAI/bge-m3` local 10k : accuracy `0.8981`,
+  macro F1 `0.8997` ;
+- student hybride `BAAI/bge-m3` + TF-IDF local 10k : accuracy `0.9135`,
+  macro F1 `0.9177` ;
 - latence teacher locale observee dans les logs : p95 autour de `16 ms`.
 
 Si un premier run produit des `429`, verifier que `config.local_10k.yaml`

@@ -26,6 +26,29 @@ def main() -> int:
         default=1,
         help="Fail if fewer training samples are available. Default: 1",
     )
+    parser.add_argument(
+        "--student-kind",
+        choices=("tfidf", "embedding_logistic", "hybrid_embedding_tfidf"),
+        default="tfidf",
+        help="Student model family. Default: tfidf",
+    )
+    parser.add_argument(
+        "--embedding-model",
+        default="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        help="SentenceTransformer model for embedding_logistic students.",
+    )
+    parser.add_argument(
+        "--input-format",
+        choices=("raw", "openai_user_content"),
+        default="raw",
+        help="How to convert dataset input into training text. Default: raw",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=128,
+        help="Embedding batch size for embedding_logistic. Default: 128",
+    )
     args = parser.parse_args()
 
     try:
@@ -76,28 +99,43 @@ def main() -> int:
     y_train = train_df["validated_output"].astype(str)
     x_eval = eval_df["input"].astype(str)
     y_eval = eval_df["validated_output"].astype(str)
+    x_train_text = prepare_inputs(x_train, args.input_format)
+    x_eval_text = prepare_inputs(x_eval, args.input_format)
 
     unique_labels = sorted(y_train.unique())
-    if len(unique_labels) < 2 or len(train_df) < 3:
-        estimator = DummyClassifier(strategy="most_frequent")
-        model_kind = "dummy_most_frequent"
+    if args.student_kind in {"embedding_logistic", "hybrid_embedding_tfidf"} and len(unique_labels) >= 2 and len(train_df) >= 3:
+        model, predictions, model_kind, artifact, runtime, base_model = train_embedding_student(
+            x_train_text,
+            y_train,
+            x_eval_text,
+            args.embedding_model,
+            args.batch_size,
+            args.student_kind,
+        )
     else:
-        estimator = LogisticRegression(max_iter=1000, class_weight="balanced")
-        model_kind = "tfidf_logistic_regression"
+        if len(unique_labels) < 2 or len(train_df) < 3:
+            estimator = DummyClassifier(strategy="most_frequent")
+            model_kind = "dummy_most_frequent"
+        else:
+            estimator = LogisticRegression(max_iter=1000, class_weight="balanced")
+            model_kind = "tfidf_logistic_regression"
 
-    model = Pipeline(
-        [
-            ("tfidf", TfidfVectorizer(max_features=50_000, ngram_range=(1, 2))),
-            ("classifier", estimator),
-        ]
-    )
-    model.fit(x_train, y_train)
-    predictions = model.predict(x_eval)
+        model = Pipeline(
+            [
+                ("tfidf", TfidfVectorizer(max_features=50_000, ngram_range=(1, 2))),
+                ("classifier", estimator),
+            ]
+        )
+        model.fit(x_train_text, y_train)
+        predictions = model.predict(x_eval_text)
+        artifact = "model.joblib"
+        runtime = "python_sklearn"
+        base_model = model_kind
 
     accuracy = float(accuracy_score(y_eval, predictions))
     macro_f1 = float(f1_score(y_eval, predictions, average="macro", zero_division=0))
 
-    model_path = model_dir / "model.joblib"
+    model_path = model_dir / artifact
     joblib.dump(model, model_path)
 
     eval_report = {
@@ -105,6 +143,7 @@ def main() -> int:
         "task_id": task_id,
         "dataset_id": dataset_id,
         "model_kind": model_kind,
+        "input_format": args.input_format,
         "train_samples": int(len(train_df)),
         "eval_samples": int(len(eval_df)),
         "unique_labels": int(len(unique_labels)),
@@ -120,13 +159,14 @@ def main() -> int:
     model_manifest = {
         "model_id": model_id,
         "task_id": task_id,
-        "base_model": model_kind,
+        "base_model": base_model,
         "dataset_id": dataset_id,
         "status": "offline_eval",
         "created_at": datetime.now(timezone.utc).isoformat(),
-        "artifact": "model.joblib",
-        "runtime": "python_sklearn",
+        "artifact": artifact,
+        "runtime": runtime,
         "metrics": eval_report["metrics"],
+        "input_format": args.input_format,
         "training": {
             "train_samples": int(len(train_df)),
             "eval_samples": int(len(eval_df)),
@@ -147,6 +187,98 @@ def first_non_empty(*frames: Any) -> Any:
         if not frame.empty:
             return frame
     return frames[-1]
+
+
+def prepare_inputs(values: Any, input_format: str) -> list[str]:
+    if input_format == "raw":
+        return [str(value) for value in values]
+    return [extract_openai_user_content(str(value)) for value in values]
+
+
+def extract_openai_user_content(value: str) -> str:
+    try:
+        payload = json.loads(value)
+    except json.JSONDecodeError:
+        return value
+    if not isinstance(payload, dict):
+        return value
+    messages = payload.get("messages")
+    if not isinstance(messages, list):
+        return value
+    parts = []
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        if message.get("role") != "user":
+            continue
+        content = message.get("content")
+        if isinstance(content, str):
+            parts.append(content)
+        elif content is not None:
+            parts.append(json.dumps(content, sort_keys=True))
+    return "\n".join(parts) if parts else value
+
+
+def train_embedding_student(
+    x_train: list[str],
+    y_train: Any,
+    x_eval: list[str],
+    embedding_model: str,
+    batch_size: int,
+    student_kind: str,
+) -> tuple[Any, Any, str, str, str, str]:
+    try:
+        from sentence_transformers import SentenceTransformer
+        from scipy.sparse import csr_matrix, hstack
+        from sklearn.feature_extraction.text import TfidfVectorizer
+        from sklearn.linear_model import LogisticRegression
+    except ImportError as exc:
+        raise SystemExit(
+            f"missing embedding training dependency: {exc}. "
+            "Install with: python3 -m pip install -r requirements-training.txt"
+        ) from exc
+
+    encoder = SentenceTransformer(embedding_model)
+    train_embeddings = encoder.encode(
+        x_train,
+        batch_size=batch_size,
+        normalize_embeddings=True,
+        show_progress_bar=True,
+    )
+    eval_embeddings = encoder.encode(
+        x_eval,
+        batch_size=batch_size,
+        normalize_embeddings=True,
+        show_progress_bar=True,
+    )
+    model_kind = "embedding_logistic_regression"
+    artifact = "classifier.joblib"
+    runtime = "python_sentence_transformers"
+    train_features = train_embeddings
+    eval_features = eval_embeddings
+    vectorizer = None
+    if student_kind == "hybrid_embedding_tfidf":
+        vectorizer = TfidfVectorizer(max_features=50_000, ngram_range=(1, 2))
+        train_tfidf = vectorizer.fit_transform(x_train)
+        eval_tfidf = vectorizer.transform(x_eval)
+        train_features = hstack([csr_matrix(train_embeddings), train_tfidf], format="csr")
+        eval_features = hstack([csr_matrix(eval_embeddings), eval_tfidf], format="csr")
+        model_kind = "hybrid_embedding_tfidf_logistic_regression"
+        artifact = "hybrid.joblib"
+        runtime = "python_sentence_transformers_hybrid"
+
+    classifier = LogisticRegression(max_iter=2000, class_weight="balanced")
+    classifier.fit(train_features, y_train)
+    predictions = classifier.predict(eval_features)
+    model = classifier if vectorizer is None else {"classifier": classifier, "vectorizer": vectorizer}
+    return (
+        model,
+        predictions,
+        model_kind,
+        artifact,
+        runtime,
+        embedding_model,
+    )
 
 
 def default_model_id(task_id: str) -> str:

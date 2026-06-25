@@ -3,3 +3,5 @@ joblib
 pandas
 pyarrow
 scikit-learn
+scipy
+sentence-transformers
