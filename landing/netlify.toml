@@ -1,0 +1,28 @@
+# Netlify config for the DistillForge Cloud landing page.
+# Set the site's "Base directory" to `landing` in the Netlify UI, OR deploy
+# from repo root — this file is read relative to the base directory.
+
+[build]
+  # Pure static site, no build step.
+  publish = "."
+  command = ""
+
+# Long-cache static assets, but always revalidate the HTML entrypoint.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "geolocation=(), microphone=(), camera=()"
+
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+# SPA-style fallback (harmless for a single page; future-proofs extra routes).
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

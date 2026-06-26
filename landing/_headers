@@ -1,0 +1,12 @@
+# Cloudflare Pages reads this file (Netlify-compatible format).
+/*
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: geolocation=(), microphone=(), camera=()
+
+/index.html
+  Cache-Control: public, max-age=0, must-revalidate
+
+/diagram.svg
+  Cache-Control: public, max-age=86400
