@@ -9,6 +9,7 @@ Proxy FinOps pour LLM.
 - [Specifications fonctionnelles](specs.md)
 - [Architecture technique](ARCHITECTURE.md)
 - [Demo Groq + BANKING77](examples/groq_banking77/README.md)
+- [Demo CFPB avec teacher LLM local](examples/cfpb_complaints/README.md)
 
 ## V1 proxy
 

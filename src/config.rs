@@ -314,4 +314,20 @@ mod tests {
         );
         assert!(!config.rate_limits.enabled);
     }
+
+    #[test]
+    fn parses_cfpb_complaints_local_llm_config() {
+        let config = load_config("examples/cfpb_complaints/config.local_llm.yaml")
+            .expect("CFPB local LLM demo config should parse");
+
+        assert_eq!(config.teacher.name, "qwen3_8b_cfpb_teacher");
+        assert_eq!(config.teacher.address, "127.0.0.1:9600");
+        assert_eq!(config.students[0].name, "cfpb_product_student_hybrid_bge_m3");
+        assert_eq!(config.students[0].address, "127.0.0.1:9102");
+        assert_eq!(
+            config.routing.snapshot_path,
+            "examples/cfpb_complaints/routing_snapshot.local_llm.json"
+        );
+        assert!(!config.rate_limits.enabled);
+    }
 }

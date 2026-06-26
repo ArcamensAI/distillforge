@@ -1,0 +1,44 @@
+server:
+  listen_addr: "127.0.0.1:6188"
+  metrics_addr: "127.0.0.1:6192"
+
+teacher:
+  name: "qwen3_8b_cfpb_teacher"
+  address: "127.0.0.1:9600"
+  use_tls: false
+  sni: ""
+  host_header: "127.0.0.1:9600"
+  input_cost_per_million_tokens_usd: 0.0
+  output_cost_per_million_tokens_usd: 0.0
+
+students:
+  - name: "cfpb_product_student_hybrid_bge_m3"
+    address: "127.0.0.1:9102"
+    use_tls: false
+    sni: ""
+    host_header: "127.0.0.1:9102"
+    input_cost_per_million_tokens_usd: 0.0
+    output_cost_per_million_tokens_usd: 0.0
+
+timeouts:
+  upstream_connection_timeout_ms: 2000
+  teacher_inference_timeout_ms: 180000
+  student_inference_timeout_ms: 5000
+  upstream_write_timeout_ms: 180000
+  shadow_student_timeout_ms: 10000
+
+logging:
+  path: "examples/cfpb_complaints/data_llm/logs/proxy.jsonl"
+  feedback_path: "examples/cfpb_complaints/data_llm/logs/feedback.jsonl"
+  shadow_path: "examples/cfpb_complaints/data_llm/logs/shadow.jsonl"
+  mode: "redacted"
+  max_capture_bytes: 65536
+
+routing:
+  default_missing_task_behavior: "teacher_fallback"
+  snapshot_path: "examples/cfpb_complaints/routing_snapshot.local_llm.json"
+
+rate_limits:
+  enabled: false
+  window_ms: 60000
+  default_requests_per_window: null
