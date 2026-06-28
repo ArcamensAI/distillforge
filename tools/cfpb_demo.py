@@ -55,6 +55,8 @@ def main() -> int:
     run_proxy.add_argument("--sleep-ms", type=int, default=0)
     run_proxy.add_argument(
         "--skip-existing-log",
+        action="append",
+        default=[],
         help="Skip request ids already present as successful calls in this DistillForge proxy log.",
     )
 
@@ -278,7 +280,9 @@ def load_allowed_labels(path: Path) -> set[str]:
 def run_proxy_requests(args: argparse.Namespace) -> int:
     requests = list(read_jsonl(Path(args.requests)))
     if args.skip_existing_log:
-        existing = successful_request_ids(Path(args.skip_existing_log))
+        existing = set()
+        for skip_log in args.skip_existing_log:
+            existing.update(successful_request_ids(Path(skip_log)))
         requests = [row for row in requests if row.get("request_id") not in existing]
     if args.limit > 0:
         requests = requests[: args.limit]
