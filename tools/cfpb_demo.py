@@ -39,6 +39,10 @@ def main() -> int:
     prepare.add_argument("--eval-limit", type=int, default=100)
     prepare.add_argument("--max-source-rows", type=int, default=200_000)
     prepare.add_argument("--min-narrative-chars", type=int, default=80)
+    prepare.add_argument(
+        "--allowed-labels",
+        help="Optional JSON label list or manifest containing labels. Rows outside this taxonomy are skipped.",
+    )
 
     run_proxy = subparsers.add_parser("run-proxy", help="Send prepared requests through DistillForge")
     run_proxy.add_argument(
@@ -49,6 +53,10 @@ def main() -> int:
     run_proxy.add_argument("--out", default=str(DEFAULT_ROOT / "teacher_calls.jsonl"))
     run_proxy.add_argument("--limit", type=int, default=100)
     run_proxy.add_argument("--sleep-ms", type=int, default=0)
+    run_proxy.add_argument(
+        "--skip-existing-log",
+        help="Skip request ids already present as successful calls in this DistillForge proxy log.",
+    )
 
     evaluate = subparsers.add_parser("evaluate-calls", help="Compare calls to CFPB product labels")
     evaluate.add_argument("--calls", default=str(DEFAULT_ROOT / "teacher_calls.jsonl"))
@@ -82,6 +90,13 @@ def prepare_dataset(args: argparse.Namespace) -> int:
         print(f"no eligible CFPB complaints found in {source}", file=sys.stderr)
         return 1
 
+    allowed_labels = load_allowed_labels(Path(args.allowed_labels)) if args.allowed_labels else None
+    if allowed_labels:
+        rows = [row for row in rows if slugify(row["product"]) in allowed_labels]
+        if not rows:
+            print(f"no rows match allowed labels from {args.allowed_labels}", file=sys.stderr)
+            return 1
+
     label_map = build_label_map(rows)
     for row in rows:
         row["expected_intent"] = label_map[row["product"]]
@@ -113,6 +128,7 @@ def prepare_dataset(args: argparse.Namespace) -> int:
         "source_rows_scan_limit": args.max_source_rows,
         "eligible_rows": len(rows),
         "labels": len(labels),
+        "allowed_labels": sorted(allowed_labels) if allowed_labels else None,
         "sampled_train_requests": len(train_sample),
         "sampled_eval_requests": len(eval_sample),
         "target": "CFPB product label slug",
@@ -243,8 +259,27 @@ def write_requests(path: Path, rows: list[dict[str, str]]) -> None:
             handle.write(json.dumps(row, sort_keys=True) + "\n")
 
 
+def load_allowed_labels(path: Path) -> set[str]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if isinstance(payload, dict):
+        values = payload.get("labels")
+        if not isinstance(values, list):
+            raise ValueError(f"{path} does not contain a labels list")
+    elif isinstance(payload, list):
+        values = payload
+    else:
+        raise ValueError(f"{path} must contain a JSON list or object")
+    labels = {str(value).strip() for value in values if str(value).strip()}
+    if not labels:
+        raise ValueError(f"{path} contains no labels")
+    return labels
+
+
 def run_proxy_requests(args: argparse.Namespace) -> int:
     requests = list(read_jsonl(Path(args.requests)))
+    if args.skip_existing_log:
+        existing = successful_request_ids(Path(args.skip_existing_log))
+        requests = [row for row in requests if row.get("request_id") not in existing]
     if args.limit > 0:
         requests = requests[: args.limit]
     output_path = Path(args.out)
@@ -262,6 +297,18 @@ def run_proxy_requests(args: argparse.Namespace) -> int:
                 time.sleep(args.sleep_ms / 1000)
     print(json.dumps({"requests": len(requests), "success": success, "out": str(output_path)}, indent=2))
     return 0 if success == len(requests) else 1
+
+
+def successful_request_ids(path: Path) -> set[str]:
+    if not path.exists():
+        return set()
+    request_ids = set()
+    for row in read_jsonl(path):
+        proxy_success = row.get("status") == "success"
+        call_success = isinstance(row.get("http_status"), int) and row["http_status"] < 400
+        if (proxy_success or call_success) and row.get("request_id"):
+            request_ids.add(str(row["request_id"]))
+    return request_ids
 
 
 def call_proxy(proxy_url: str, row: dict[str, Any]) -> dict[str, Any]:
