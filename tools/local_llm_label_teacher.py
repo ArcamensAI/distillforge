@@ -22,6 +22,7 @@ def main() -> int:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=9600)
     parser.add_argument("--model", default=DEFAULT_MODEL)
+    parser.add_argument("--adapter-path", help="Optional MLX-LM LoRA adapter path")
     parser.add_argument("--model-id", default="local_llm_label_teacher")
     parser.add_argument("--labels", required=True, help="JSON list or mapping of allowed labels")
     parser.add_argument(
@@ -30,14 +31,22 @@ def main() -> int:
         help="Short instruction describing the classification task.",
     )
     parser.add_argument("--max-tokens", type=int, default=96)
+    parser.add_argument(
+        "--max-input-chars",
+        type=int,
+        default=0,
+        help="Truncate user text to this many characters. 0 disables truncation.",
+    )
     args = parser.parse_args()
 
     classifier = MlxLabelClassifier(
         model_name=args.model,
+        adapter_path=args.adapter_path,
         model_id=args.model_id,
         labels=load_labels(Path(args.labels)),
         task_description=args.task_description,
         max_tokens=args.max_tokens,
+        max_input_chars=args.max_input_chars,
     )
     LocalLlmHandler.classifier = classifier
     server = ThreadingHTTPServer((args.host, args.port), LocalLlmHandler)
@@ -56,10 +65,12 @@ class MlxLabelClassifier:
     def __init__(
         self,
         model_name: str,
+        adapter_path: str | None,
         model_id: str,
         labels: list[str],
         task_description: str,
         max_tokens: int,
+        max_input_chars: int,
     ) -> None:
         try:
             from mlx_lm import generate, load
@@ -69,18 +80,22 @@ class MlxLabelClassifier:
         if not labels:
             raise SystemExit("label list is empty")
         self.generate = generate
-        self.model, self.tokenizer = load(model_name)
+        self.model, self.tokenizer = load(model_name, adapter_path=adapter_path)
         self.model_name = model_name
+        self.adapter_path = adapter_path
         self.model_id = model_id
         self.labels = labels
         self.label_set = set(labels)
         self.task_description = task_description.strip()
         self.max_tokens = max_tokens
+        self.max_input_chars = max_input_chars
         self.lock = threading.Lock()
 
     def classify(self, text: str) -> tuple[str, str, int]:
         if not text.strip():
             raise ValueError("empty user text")
+        if self.max_input_chars > 0:
+            text = text[: self.max_input_chars]
         started = time.monotonic()
         with self.lock:
             output = self.generate(
@@ -91,7 +106,11 @@ class MlxLabelClassifier:
                 verbose=False,
             )
         latency_ms = int((time.monotonic() - started) * 1000)
-        return normalize_label(output, self.labels), output, latency_ms
+        try:
+            label = normalize_label(output, self.labels)
+        except ValueError:
+            label = fallback_label(text, output, self.labels)
+        return label, output, latency_ms
 
     def prompt(self, text: str) -> str:
         labels = "\n".join(f"- {label}" for label in self.labels)
@@ -118,8 +137,10 @@ class LocalLlmHandler(BaseHTTPRequestHandler):
                 {
                     "status": "ok",
                     "model": self.classifier.model_name,
+                    "adapter_path": self.classifier.adapter_path,
                     "model_id": self.classifier.model_id,
                     "labels": len(self.classifier.labels),
+                    "max_input_chars": self.classifier.max_input_chars,
                 },
             )
             return
@@ -213,6 +234,43 @@ def canonicalize(value: str) -> str:
     value = value.strip().lower()
     value = re.sub(r"[^a-z0-9]+", "_", value)
     return re.sub(r"_+", "_", value).strip("_")
+
+
+def fallback_label(text: str, raw_output: str, labels: list[str]) -> str:
+    stop_tokens = {
+        "and",
+        "consumer",
+        "credit",
+        "loan",
+        "other",
+        "personal",
+        "product",
+        "reported",
+        "reporting",
+        "reports",
+        "service",
+        "services",
+    }
+    haystack = canonicalize(raw_output + " " + text)
+    haystack_tokens = set(haystack.split("_"))
+    best_label = labels[0]
+    best_score = -1
+    for label in labels:
+        tokens = [
+            token
+            for token in canonicalize(label).split("_")
+            if len(token) > 2 and token not in stop_tokens
+        ]
+        score = 0
+        for token in tokens:
+            if token in haystack_tokens:
+                score += 3
+            elif token[:5] in haystack:
+                score += 1
+        if score > best_score:
+            best_label = label
+            best_score = score
+    return best_label
 
 
 def chat_response(

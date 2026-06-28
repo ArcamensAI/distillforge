@@ -38,9 +38,10 @@ def main() -> int:
         return 2
     model_id = manifest.get("model_id", model_dir.name)
     input_format = manifest.get("input_format", "raw")
+    max_input_chars = int(manifest.get("max_input_chars") or 0)
 
     host, port = parse_listen(args.listen)
-    handler = make_handler(model, model_id, input_format)
+    handler = make_handler(model, model_id, input_format, max_input_chars)
     server = ThreadingHTTPServer((host, port), handler)
     print(f"DistillForge student inference listening on {host}:{port} model={model_id}")
     server.serve_forever()
@@ -91,6 +92,9 @@ def load_model(model_path: Path, manifest: dict[str, Any]) -> Any:
         from sentence_transformers import SentenceTransformer
 
         encoder = SentenceTransformer(manifest["base_model"])
+        max_seq_length = int(manifest.get("embedding_max_seq_length") or 0)
+        if max_seq_length > 0:
+            encoder.max_seq_length = max_seq_length
         artifact = joblib.load(model_path)
         if runtime == "python_sentence_transformers_hybrid":
             return SentenceTransformerStudent(
@@ -102,7 +106,12 @@ def load_model(model_path: Path, manifest: dict[str, Any]) -> Any:
     return joblib.load(model_path)
 
 
-def make_handler(model: Any, model_id: str, input_format: str = "raw") -> type[BaseHTTPRequestHandler]:
+def make_handler(
+    model: Any,
+    model_id: str,
+    input_format: str = "raw",
+    max_input_chars: int = 0,
+) -> type[BaseHTTPRequestHandler]:
     class StudentInferenceHandler(BaseHTTPRequestHandler):
         server_version = "DistillForgeStudent/0.1"
 
@@ -119,7 +128,7 @@ def make_handler(model: Any, model_id: str, input_format: str = "raw") -> type[B
                 return
 
             if self.path == "/infer":
-                input_text = extract_infer_input(body)
+                input_text = truncate_input(extract_infer_input(body), max_input_chars)
                 output, confidence = predict(model, input_text)
                 self.write_json(
                     {
@@ -130,7 +139,7 @@ def make_handler(model: Any, model_id: str, input_format: str = "raw") -> type[B
                     }
                 )
             elif self.path == "/v1/chat/completions":
-                input_text = extract_chat_input(body, input_format)
+                input_text = truncate_input(extract_chat_input(body, input_format), max_input_chars)
                 output, _confidence = predict(model, input_text)
                 self.write_json(
                     {
@@ -147,7 +156,7 @@ def make_handler(model: Any, model_id: str, input_format: str = "raw") -> type[B
                     }
                 )
             elif self.path == "/v1/completions":
-                input_text = extract_completion_input(body)
+                input_text = truncate_input(extract_completion_input(body), max_input_chars)
                 output, _confidence = predict(model, input_text)
                 self.write_json(
                     {
@@ -244,6 +253,12 @@ def extract_completion_input(body: Any) -> str:
             return prompt
         return json.dumps(prompt, sort_keys=True)
     return str(body)
+
+
+def truncate_input(value: str, max_input_chars: int) -> str:
+    if max_input_chars <= 0:
+        return value
+    return value[:max_input_chars]
 
 
 def parse_listen(value: str) -> tuple[str, int]:

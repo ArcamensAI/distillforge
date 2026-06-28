@@ -6,6 +6,7 @@ FinOps proxy for LLMs.
 
 ## Documentation
 
+- [Installation](docs/INSTALLATION.md)
 - [Functional specifications](specs.md)
 - [Technical architecture](ARCHITECTURE.md)
 - [Groq + BANKING77 demo](examples/groq_banking77/README.md)
@@ -173,8 +174,11 @@ python3 tools/train_student.py --dataset data/datasets/test_task/ds_example
 ```
 
 The trainer produces `model.joblib`, `eval_report.json` and `manifest.json`
-under `models/{task_id}/{model_id}`. It uses TF-IDF + LogisticRegression when
-the dataset contains several classes, otherwise a `DummyClassifier` baseline.
+under `models/{task_id}/{model_id}`. It supports `tfidf`,
+`tfidf_mlp`, `embedding_logistic`, `embedding_mlp`,
+`hybrid_embedding_tfidf` and `hybrid_embedding_tfidf_mlp` students.
+The default `tfidf` mode uses TF-IDF + LogisticRegression when the dataset
+contains several classes, otherwise a `DummyClassifier` baseline.
 
 The trained model can be served over HTTP:
 

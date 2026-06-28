@@ -28,7 +28,14 @@ def main() -> int:
     )
     parser.add_argument(
         "--student-kind",
-        choices=("tfidf", "embedding_logistic", "hybrid_embedding_tfidf"),
+        choices=(
+            "tfidf",
+            "tfidf_mlp",
+            "embedding_logistic",
+            "embedding_mlp",
+            "hybrid_embedding_tfidf",
+            "hybrid_embedding_tfidf_mlp",
+        ),
         default="tfidf",
         help="Student model family. Default: tfidf",
     )
@@ -49,6 +56,18 @@ def main() -> int:
         default=128,
         help="Embedding batch size for embedding_logistic. Default: 128",
     )
+    parser.add_argument(
+        "--max-input-chars",
+        type=int,
+        default=0,
+        help="Truncate prepared input text to this many characters. 0 disables truncation.",
+    )
+    parser.add_argument(
+        "--embedding-max-seq-length",
+        type=int,
+        default=0,
+        help="Set SentenceTransformer max_seq_length. 0 keeps the model default.",
+    )
     args = parser.parse_args()
 
     try:
@@ -58,6 +77,7 @@ def main() -> int:
         from sklearn.feature_extraction.text import TfidfVectorizer
         from sklearn.linear_model import LogisticRegression
         from sklearn.metrics import accuracy_score, f1_score
+        from sklearn.neural_network import MLPClassifier
         from sklearn.pipeline import Pipeline
     except ImportError as exc:
         print(
@@ -99,19 +119,52 @@ def main() -> int:
     y_train = train_df["validated_output"].astype(str)
     x_eval = eval_df["input"].astype(str)
     y_eval = eval_df["validated_output"].astype(str)
-    x_train_text = prepare_inputs(x_train, args.input_format)
-    x_eval_text = prepare_inputs(x_eval, args.input_format)
+    x_train_text = prepare_inputs(x_train, args.input_format, args.max_input_chars)
+    x_eval_text = prepare_inputs(x_eval, args.input_format, args.max_input_chars)
 
     unique_labels = sorted(y_train.unique())
-    if args.student_kind in {"embedding_logistic", "hybrid_embedding_tfidf"} and len(unique_labels) >= 2 and len(train_df) >= 3:
+    if args.student_kind in {
+        "embedding_logistic",
+        "embedding_mlp",
+        "hybrid_embedding_tfidf",
+        "hybrid_embedding_tfidf_mlp",
+    } and len(unique_labels) >= 2 and len(train_df) >= 3:
         model, predictions, model_kind, artifact, runtime, base_model = train_embedding_student(
             x_train_text,
             y_train,
             x_eval_text,
             args.embedding_model,
             args.batch_size,
+            args.embedding_max_seq_length,
             args.student_kind,
         )
+    elif args.student_kind == "tfidf_mlp" and len(unique_labels) >= 2 and len(train_df) >= 3:
+        model = Pipeline(
+            [
+                ("tfidf", TfidfVectorizer(max_features=20_000, ngram_range=(1, 2), min_df=2)),
+                (
+                    "classifier",
+                    MLPClassifier(
+                        hidden_layer_sizes=(256, 128),
+                        activation="relu",
+                        solver="adam",
+                        alpha=1e-4,
+                        batch_size=64,
+                        learning_rate_init=1e-3,
+                        max_iter=80,
+                        early_stopping=False,
+                        n_iter_no_change=8,
+                        random_state=42,
+                    ),
+                ),
+            ]
+        )
+        model.fit(x_train_text, y_train)
+        predictions = model.predict(x_eval_text)
+        model_kind = "tfidf_mlp_classifier"
+        artifact = "model.joblib"
+        runtime = "python_sklearn"
+        base_model = model_kind
     else:
         if len(unique_labels) < 2 or len(train_df) < 3:
             estimator = DummyClassifier(strategy="most_frequent")
@@ -144,6 +197,8 @@ def main() -> int:
         "dataset_id": dataset_id,
         "model_kind": model_kind,
         "input_format": args.input_format,
+        "max_input_chars": int(args.max_input_chars),
+        "embedding_max_seq_length": int(args.embedding_max_seq_length),
         "train_samples": int(len(train_df)),
         "eval_samples": int(len(eval_df)),
         "unique_labels": int(len(unique_labels)),
@@ -167,6 +222,8 @@ def main() -> int:
         "runtime": runtime,
         "metrics": eval_report["metrics"],
         "input_format": args.input_format,
+        "max_input_chars": int(args.max_input_chars),
+        "embedding_max_seq_length": int(args.embedding_max_seq_length),
         "training": {
             "train_samples": int(len(train_df)),
             "eval_samples": int(len(eval_df)),
@@ -189,10 +246,14 @@ def first_non_empty(*frames: Any) -> Any:
     return frames[-1]
 
 
-def prepare_inputs(values: Any, input_format: str) -> list[str]:
+def prepare_inputs(values: Any, input_format: str, max_input_chars: int = 0) -> list[str]:
     if input_format == "raw":
-        return [str(value) for value in values]
-    return [extract_openai_user_content(str(value)) for value in values]
+        texts = [str(value) for value in values]
+    else:
+        texts = [extract_openai_user_content(str(value)) for value in values]
+    if max_input_chars <= 0:
+        return texts
+    return [text[:max_input_chars] for text in texts]
 
 
 def extract_openai_user_content(value: str) -> str:
@@ -225,6 +286,7 @@ def train_embedding_student(
     x_eval: list[str],
     embedding_model: str,
     batch_size: int,
+    embedding_max_seq_length: int,
     student_kind: str,
 ) -> tuple[Any, Any, str, str, str, str]:
     try:
@@ -232,6 +294,7 @@ def train_embedding_student(
         from scipy.sparse import csr_matrix, hstack
         from sklearn.feature_extraction.text import TfidfVectorizer
         from sklearn.linear_model import LogisticRegression
+        from sklearn.neural_network import MLPClassifier
     except ImportError as exc:
         raise SystemExit(
             f"missing embedding training dependency: {exc}. "
@@ -239,6 +302,8 @@ def train_embedding_student(
         ) from exc
 
     encoder = SentenceTransformer(embedding_model)
+    if embedding_max_seq_length > 0:
+        encoder.max_seq_length = embedding_max_seq_length
     train_embeddings = encoder.encode(
         x_train,
         batch_size=batch_size,
@@ -257,7 +322,7 @@ def train_embedding_student(
     train_features = train_embeddings
     eval_features = eval_embeddings
     vectorizer = None
-    if student_kind == "hybrid_embedding_tfidf":
+    if student_kind in {"hybrid_embedding_tfidf", "hybrid_embedding_tfidf_mlp"}:
         vectorizer = TfidfVectorizer(max_features=50_000, ngram_range=(1, 2))
         train_tfidf = vectorizer.fit_transform(x_train)
         eval_tfidf = vectorizer.transform(x_eval)
@@ -267,7 +332,26 @@ def train_embedding_student(
         artifact = "hybrid.joblib"
         runtime = "python_sentence_transformers_hybrid"
 
-    classifier = LogisticRegression(max_iter=2000, class_weight="balanced")
+    if student_kind in {"embedding_mlp", "hybrid_embedding_tfidf_mlp"}:
+        classifier = MLPClassifier(
+            hidden_layer_sizes=(256,),
+            activation="relu",
+            solver="adam",
+            alpha=1e-4,
+            batch_size=64,
+            learning_rate_init=1e-3,
+            max_iter=120,
+            early_stopping=False,
+            n_iter_no_change=10,
+            random_state=42,
+        )
+        model_kind = "embedding_mlp_classifier"
+        if vectorizer is not None:
+            model_kind = "hybrid_embedding_tfidf_mlp_classifier"
+            artifact = "hybrid_mlp.joblib"
+            runtime = "python_sentence_transformers_hybrid"
+    else:
+        classifier = LogisticRegression(max_iter=2000, class_weight="balanced")
     classifier.fit(train_features, y_train)
     predictions = classifier.predict(eval_features)
     model = classifier if vectorizer is None else {"classifier": classifier, "vectorizer": vectorizer}
